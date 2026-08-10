@@ -11,6 +11,7 @@ def generate_launch_description():
         DeclareLaunchArgument('duct_z', default_value='-1.0', description='Duct position along the Z-axis'),
         DeclareLaunchArgument('delta', default_value='0.2', description='Distance between waypoints of the path'),
         DeclareLaunchArgument('kp', default_value='1.5', description='Proportional gain for the proportional controller'),
+        DeclareLaunchArgument('ki', default_value='1.0', description='Integral gain for the proportional controller'),
         DeclareLaunchArgument('side', default_value='2.15', description='Side length of the square'),
         DeclareLaunchArgument('radius', default_value='1.35', description='Radius of the circle or spiral'),
         DeclareLaunchArgument('dz', default_value='-1.0', description='Vertical step size of the spiral'),

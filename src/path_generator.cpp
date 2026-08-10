@@ -14,6 +14,24 @@ PathGenerate::PathGenerate() : Node("path_generate")
     this->declare_parameter<std::string>("path_type", "circle");
 
     this->get_parameter("frame_id", frame_id_);
+    updatePathParams();
+
+    path_pub_ = this->create_publisher<nav_msgs::msg::Path>("local_path", 10);
+    generate_path_srv_ = this->create_service<std_srvs::srv::Trigger>("generate_path", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request> request, std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+        (void)request; // Unused parameter
+        updatePathParams();
+        generatePath();
+        response->success = true;
+        response->message = "Path generated successfully";
+    });
+    // timer_ = this->create_wall_timer(std::chrono::milliseconds(1000), [this](){generatePath();});
+    path_index_ = 0;
+
+    RCLCPP_INFO(this->get_logger(), "Generating path");
+}
+
+void PathGenerate::updatePathParams()
+{
     this->get_parameter("delta", path_params_.delta);
     this->get_parameter("side", path_params_.side);
     this->get_parameter("radius", path_params_.radius);
@@ -22,14 +40,7 @@ PathGenerate::PathGenerate() : Node("path_generate")
     this->get_parameter("depth", path_params_.depth);
     this->get_parameter("path_type", path_type_str);
     path_type_ = stringToPathType(path_type_str);
-
-    path_pub_ = this->create_publisher<nav_msgs::msg::Path>("local_path", 10);
-    timer_ = this->create_wall_timer(std::chrono::milliseconds(1000), [this](){generatePath();});
-    path_index_ = 0;
-
-    RCLCPP_INFO(this->get_logger(), "Generating path");
 }
-
 void PathGenerate::publishPath()
 {
     nav_msgs::msg::Path path;
@@ -59,7 +70,7 @@ PathType PathGenerate::stringToPathType(const std::string & type)
 }
 
 void PathGenerate::waypointGenerate()
-{
+{   
     switch (path_type_)
     {
         case PathType::SQUARE:

@@ -24,13 +24,22 @@ TrajectoryController::TrajectoryController() : Node("trajectory_controller")
 
     rc_pub_ = this->create_publisher<mavros_msgs::msg::OverrideRCIn>("/mavros/rc/override", 10);
     path_pub_ = this->create_publisher<nav_msgs::msg::Path>("transformed_path", 10);
-    mavros_arm_client_ = this->create_client<mavros_msgs::srv::CommandBool>("/mavros/cmd/arming");
-    mavros_set_mode_client_ = this->create_client<mavros_msgs::srv::SetMode>("/mavros/set_mode");
-    slam_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>("/mavros/vision_pose/pose", 10, std::bind(&TrajectoryController::slam_cb, this, std::placeholders::_1));
+
+    // In your TrajectoryController constructor:
+    rclcpp::CallbackGroup::SharedPtr cb_group_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    rclcpp::CallbackGroup::SharedPtr cb_group_timer = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+
+
+    mavros_arm_client_ = this->create_client<mavros_msgs::srv::CommandBool>("/mavros/cmd/arming", rmw_qos_profile_services_default, cb_group_);
+    mavros_set_mode_client_ = this->create_client<mavros_msgs::srv::SetMode>("/mavros/set_mode", rmw_qos_profile_services_default, cb_group_);
+    start_trajectory_srv = this->create_service<std_srvs::srv::SetBool>("start_trajectory", std::bind(&TrajectoryController::start_trajectory_cb, this, std::placeholders::_1, std::placeholders::_2));
+
+    slam_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>("/mavros/local_position/pose", 10, std::bind(&TrajectoryController::slam_cb, this, std::placeholders::_1));
     state_sub_ = this->create_subscription<mavros_msgs::msg::State>("/mavros/state", 10, std::bind(&TrajectoryController::state_cb, this, std::placeholders::_1));
     path_sub_ = this->create_subscription<nav_msgs::msg::Path>("local_path", 10, std::bind(&TrajectoryController::transformPath, this, std::placeholders::_1));
     alt_sub_ = this->create_subscription<mavros_msgs::msg::VfrHud>("/mavros/vfr_hud", 10, std::bind(&TrajectoryController::alt_cb, this, std::placeholders::_1));
-    timer_ = this->create_wall_timer(std::chrono::milliseconds(100), [this]() {pathFollower();});
+    
+    timer_ = this->create_wall_timer(std::chrono::milliseconds(100), std::bind(&TrajectoryController::pathFollower, this), cb_group_timer);
 
     rclcpp::QoS qos(rclcpp::KeepLast(10));
     qos.best_effort();
@@ -42,6 +51,19 @@ TrajectoryController::TrajectoryController() : Node("trajectory_controller")
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 }
 
+void TrajectoryController::start_trajectory_cb(const std::shared_ptr<std_srvs::srv::SetBool::Request> request, std::shared_ptr<std_srvs::srv::SetBool::Response> response)
+{
+    follow_path = request->data;
+    if (follow_path) {
+        RCLCPP_INFO(this->get_logger(), "Starting trajectory following");
+        // trajectory_index_ = 0; // Reset the trajectory index when starting
+    } else {
+        RCLCPP_INFO(this->get_logger(), "Stopping trajectory following");
+        publish_rc(0.0, 0.0, 0.0, 0.0); // Stop the robot
+    }
+    response->success = true;
+    response->message = follow_path ? "Trajectory following started" : "Trajectory following stopped";
+}
 void TrajectoryController::state_cb(const mavros_msgs::msg::State::ConstSharedPtr & msg)
 {
     connected_ = msg->connected;
@@ -112,7 +134,7 @@ void TrajectoryController::publish_rc(float forward, float lateral, float depth,
     rc_msg.channels[4 - 1] = map_pwm(yaw,true, 0.1); // Yaw
     rc_msg.channels[3 - 1] = map_pwm(depth,false, 0.1); // Depth
 
-    RCLCPP_INFO(this->get_logger(), "forw:%4d | lat:%4d | yaw:%4d | depth:%4d ", rc_msg.channels[5 - 1], rc_msg.channels[6 - 1], rc_msg.channels[4 - 1], rc_msg.channels[3 - 1]);
+    // RCLCPP_INFO(this->get_logger(), "forw:%4d | lat:%4d | yaw:%4d | depth:%4d ", rc_msg.channels[5 - 1], rc_msg.channels[6 - 1], rc_msg.channels[4 - 1], rc_msg.channels[3 - 1]);
 
     rc_pub_->publish(rc_msg);
 }
@@ -253,6 +275,10 @@ tf2::Quaternion TrajectoryController::lookAtTheDuct(const geometry_msgs::msg::Po
 
 void TrajectoryController::pathFollower()
 {
+    if (!follow_path) { 
+        RCLCPP_INFO(this->get_logger(), "Trajectory following is disabled");
+        return;}
+
     if (trajectory_index_>= path_transformed_.size()) {
         RCLCPP_INFO_ONCE(get_logger(), "Trajectory completed");
         disarm();
@@ -269,6 +295,7 @@ void TrajectoryController::pathFollower()
             return;
         }
         if (!armed_) {
+            RCLCPP_INFO_ONCE(get_logger(), "Robot not armed");
             set_arm(true);
             return;
         }

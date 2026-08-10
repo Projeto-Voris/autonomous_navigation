@@ -18,6 +18,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
+find_package(std_srvs REQUIRED)
 
 include_directories(include)
 
@@ -30,7 +31,7 @@ sensor_msgs
 mavros_msgs
 geometry_msgs
 nav_msgs
-nav_msgs
+std_srvs
 tf2_geometry_msgs
 Eigen3
 )
@@ -41,7 +42,7 @@ sensor_msgs
 mavros_msgs
 geometry_msgs
 nav_msgs
-nav_msgs
+std_srvs
 tf2_geometry_msgs
 Eigen3
 )

@@ -12,6 +12,7 @@
 #include "mavros_msgs/srv/set_mode.hpp"
 #include "mavros_msgs/msg/state.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
+#include "std_srvs/srv/trigger.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "geometry_msgs/msg/twist.hpp"
@@ -39,12 +40,13 @@ public:
 
 private:
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
+    rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr generate_path_srv_;
     rclcpp::TimerBase::SharedPtr timer_;
 
     void publishPath();
     void generatePath();
     void waypointGenerate();
-
+    void updatePathParams();
     void squareGenerate();
     void circleGenerate();
     void spiralGenerate();
