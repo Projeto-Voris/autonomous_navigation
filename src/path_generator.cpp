@@ -56,6 +56,7 @@ void PathGenerate::publishPath()
         pose.pose.orientation.w = 1.0;
         path.poses.push_back(pose);
     }
+    RCLCPP_INFO(this->get_logger(), "Publishing path with %zu waypoints", path.poses.size());
     path_pub_->publish(path);
 }
 
@@ -214,8 +215,12 @@ void PathGenerate::generatePath()
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
-    auto node = std::make_shared<PathGenerate>();
-    rclcpp::spin(node);
+    auto node = std::make_shared<PathGenerate>(); 
+    // Substitua o rclcpp::spin(node) por MultiThreadedExecutor:
+    rclcpp::executors::MultiThreadedExecutor executor;
+    executor.add_node(node);
+    executor.spin();
+
     rclcpp::shutdown();
     return 0;
 }

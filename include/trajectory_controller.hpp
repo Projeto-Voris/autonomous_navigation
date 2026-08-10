@@ -10,6 +10,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <std_srvs/srv/set_bool.hpp>
+#include <std_srvs/srv/trigger.hpp>
 #include "mavros_msgs/msg/override_rc_in.hpp"
 #include "mavros_msgs/srv/command_bool.hpp"
 #include "mavros_msgs/srv/set_mode.hpp"
@@ -32,6 +33,7 @@ class TrajectoryController : public rclcpp::Node
 {
 public:
     TrajectoryController();
+    ~TrajectoryController();
     bool disarm();
 
     static std::shared_ptr<TrajectoryController> instance;
@@ -72,9 +74,13 @@ private:
     rclcpp::Publisher<mavros_msgs::msg::OverrideRCIn>::SharedPtr rc_pub_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
 
-    rclcpp::Client<std_srvs::srv::SetBool>::SharedPtr generate_trajectory_client;
+    rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr generate_trajectory_client;
     rclcpp::Client<mavros_msgs::srv::CommandBool>::SharedPtr mavros_arm_client_;
     rclcpp::Client<mavros_msgs::srv::SetMode>::SharedPtr mavros_set_mode_client_;   
+
+    rclcpp::CallbackGroup::SharedPtr cb_group_;
+    rclcpp::CallbackGroup::SharedPtr cb_group_timer_;
+    rclcpp::CallbackGroup::SharedPtr cb_group_sub_;
 
     rclcpp::TimerBase::SharedPtr timer_;
 
