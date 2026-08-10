@@ -12,6 +12,7 @@
 #include "mavros_msgs/srv/set_mode.hpp"
 #include "mavros_msgs/msg/state.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
+#include "autonomous_navigation_msgs/srv/path_generator.hpp"
 #include "std_srvs/srv/trigger.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
@@ -40,9 +41,10 @@ public:
 
 private:
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
-    rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr generate_path_srv_;
+    rclcpp::Service<autonomous_navigation_msgs::srv::PathGenerator>::SharedPtr generate_path_srv_;
     rclcpp::TimerBase::SharedPtr timer_;
 
+    void generate_path_cb(const std::shared_ptr<autonomous_navigation_msgs::srv::PathGenerator::Request> request, std::shared_ptr<autonomous_navigation_msgs::srv::PathGenerator::Response> response);
     void publishPath();
     void generatePath();
     void waypointGenerate();
@@ -63,8 +65,8 @@ private:
     size_t path_index_;
     
     PathType path_type_;
-    std::string path_type_str;
-    PathType stringToPathType(const std::string & type);
+    int path_type_str_;
+    PathType stringToPathType(const int & type);
 
     struct PathParams
     {

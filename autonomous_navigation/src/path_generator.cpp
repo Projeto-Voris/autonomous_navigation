@@ -5,42 +5,45 @@
 PathGenerate::PathGenerate() : Node("path_generate")
 {
     this->declare_parameter<std::string>("frame_id", "map");
-    this->declare_parameter<double>("delta", 0.2);
-    this->declare_parameter<double>("side", 2.0);
-    this->declare_parameter<double>("radius", 1.0);
-    this->declare_parameter<double>("dz", -1.0);
-    this->declare_parameter<int>("turns", 4);
-    this->declare_parameter<int>("depth", 4);
-    this->declare_parameter<std::string>("path_type", "circle");
+
 
     this->get_parameter("frame_id", frame_id_);
-    updatePathParams();
+    // updatePathParams();
 
     path_pub_ = this->create_publisher<nav_msgs::msg::Path>("local_path", 10);
-    generate_path_srv_ = this->create_service<std_srvs::srv::Trigger>("generate_path", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request> request, std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
-        (void)request; // Unused parameter
-        updatePathParams();
-        generatePath();
-        response->success = true;
-        response->message = "Path generated successfully";
-    });
+    generate_path_srv_ = this->create_service<autonomous_navigation_msgs::srv::PathGenerator>("generate_path", std::bind(&PathGenerate::generate_path_cb, this, std::placeholders::_1, std::placeholders::_2));
     // timer_ = this->create_wall_timer(std::chrono::milliseconds(1000), [this](){generatePath();});
     path_index_ = 0;
 
     RCLCPP_INFO(this->get_logger(), "Generating path");
 }
 
-void PathGenerate::updatePathParams()
+void PathGenerate::generate_path_cb(const std::shared_ptr<autonomous_navigation_msgs::srv::PathGenerator::Request> request, std::shared_ptr<autonomous_navigation_msgs::srv::PathGenerator::Response> response)
 {
-    this->get_parameter("delta", path_params_.delta);
-    this->get_parameter("side", path_params_.side);
-    this->get_parameter("radius", path_params_.radius);
-    this->get_parameter("dz", path_params_.dz);
-    this->get_parameter("turns", path_params_.turns);
-    this->get_parameter("depth", path_params_.depth);
-    this->get_parameter("path_type", path_type_str);
-    path_type_ = stringToPathType(path_type_str);
+    path_params_.delta = request->delta;
+    path_params_.side = request->side;
+    path_params_.radius = request->radius;
+    path_params_.dz = request->dz;
+    path_params_.turns = request->turns;
+    path_params_.depth = request->depth;
+    path_type_ = stringToPathType(request->path_type);
+    RCLCPP_INFO(this->get_logger(), "%s", path_type_ == PathType::SQUARE ? "SQUARE" : path_type_ == PathType::CIRCLE ? "CIRCLE" : path_type_ == PathType::SPIRAL ? "SPIRAL" : path_type_ == PathType::SERPENTINE ? "SERPENTINE" : "UNKNOWN");
+    generatePath();
+    response->success = true;
+    response->message = "Path generated successfully";
 }
+
+// void PathGenerate::updatePathParams()
+// {
+//     this->get_parameter("delta", path_params_.delta);
+//     this->get_parameter("side", path_params_.side);
+//     this->get_parameter("radius", path_params_.radius);
+//     this->get_parameter("dz", path_params_.dz);
+//     this->get_parameter("turns", path_params_.turns);
+//     this->get_parameter("depth", path_params_.depth);
+//     this->get_parameter("path_type", path_type_str_);
+//     path_type_ = stringToPathType(path_type_str_);
+// }
 void PathGenerate::publishPath()
 {
     nav_msgs::msg::Path path;
@@ -60,14 +63,14 @@ void PathGenerate::publishPath()
     path_pub_->publish(path);
 }
 
-PathType PathGenerate::stringToPathType(const std::string & type)
+PathType PathGenerate::stringToPathType(const int & type)
 {
-    if (type == "square") return PathType::SQUARE;
-    if (type == "circle") return PathType::CIRCLE;
-    if (type == "spiral") return PathType::SPIRAL;
-    if (type == "serpentine") return PathType::SERPENTINE;
+    if (type == 0) return PathType::SQUARE;
+    if (type == 1) return PathType::CIRCLE;
+    if (type == 2) return PathType::SPIRAL;
+    if (type == 3) return PathType::SERPENTINE;
 
-    throw std::runtime_error("Unknown path type: " + type);
+    throw std::runtime_error("Unknown path type: " + std::to_string(type));
 }
 
 void PathGenerate::waypointGenerate()
@@ -151,21 +154,57 @@ void PathGenerate::spiralGenerate()
 
 void PathGenerate::serpentineGenerate()
 {
-    // Generate a serpentine trajectory 
-    double L = path_params_.side;
-    double w = path_params_.depth;
-    double d = path_params_.delta;
-    double h = L/2;
+    // Clear previous waypoints
+    wp_.clear();
 
-    // Go down
-    for (double z = 0; z > -w; z -= d)
-        wp_.push_back({0, 0, z});
-    // Go right
-    for (double y = d; y <= h; y += d)
-        wp_.push_back({0, y, -w});
-    // Go up
-    for (double z = -w+d; z < 0; z += d)
-        wp_.push_back({0, h, z});
+    double w = path_params_.dz; // Vertical depth (positive value)
+    double d = path_params_.delta; // Step discretization
+    int turns = path_params_.turns;
+    double h = path_params_.side;  // Horizontal spacing between vertical legs
+
+    double current_y = 0.0;
+
+    for (int i = 0; i < turns; ++i)
+    {
+        if (i % 2 == 0)
+        {
+            // Even turns: Go DOWN (from Z = 0 to Z = -w)
+            for (double z = 0.0; z >= -w; z -= d)
+            {
+                wp_.push_back({0.0, current_y, z});
+            }
+
+            // Move RIGHT to the next leg position (if not the last turn)
+            if (i < turns - 1)
+            {
+                double target_y = current_y + h;
+                for (double y = current_y + d; y <= target_y; y += d)
+                {
+                    wp_.push_back({0.0, y, -w});
+                }
+                current_y = target_y;
+            }
+        }
+        else
+        {
+            // Odd turns: Go UP (from Z = -w to Z = 0)
+            for (double z = -w; z <= 0.0; z += d)
+            {
+                wp_.push_back({0.0, current_y, z});
+            }
+
+            // Move RIGHT to the next leg position (if not the last turn)
+            if (i < turns - 1)
+            {
+                double target_y = current_y + h;
+                for (double y = current_y + d; y <= target_y; y += d)
+                {
+                    wp_.push_back({0.0, y, 0.0});
+                }
+                current_y = target_y;
+            }
+        }
+    }
 }
 
 void PathGenerate::generatePath()

@@ -1,0 +1,18 @@
+# Request (Input parameters)
+int8 CIRCLE=0
+int8 SQUARE=1
+int8 SERPENTINE=2
+int8 SPIRAL=3
+
+int8 path_type
+float32 side
+float32 delta
+float32 dz
+float32 radius
+int8 turns
+int8 depth
+
+---
+# Response (Feedback returned by the service)
+bool success
+string message

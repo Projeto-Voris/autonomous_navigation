@@ -5,11 +5,21 @@
 TrajectoryController::TrajectoryController() : Node("trajectory_controller")
 {
     this->declare_parameter<std::string>("frame_id", "map");
+
+    this->declare_parameter<double>("delta", 0.2);
+    this->declare_parameter<double>("side", 2.0);
+    this->declare_parameter<double>("radius", 1.0);
+    this->declare_parameter<double>("dz", -1.0);
+    this->declare_parameter<int>("turns", 4);
+    this->declare_parameter<int>("depth", 4);
+    this->declare_parameter<int>("path_type", 0);
+
     this->declare_parameter<double>("duct_x", 3.0);
     this->declare_parameter<double>("duct_y", 1.5);
     this->declare_parameter<double>("duct_z", -1.0);
     this->declare_parameter<double>("kp", 2.0);
     this->declare_parameter<double>("ki", 1.0);
+    
     this->declare_parameter<bool>("debug_mode", false);
 
     this->get_parameter("frame_id", frame_id_);
@@ -35,7 +45,7 @@ TrajectoryController::TrajectoryController() : Node("trajectory_controller")
     cb_group_sub_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
 
-    generate_trajectory_client = this->create_client<std_srvs::srv::Trigger>("generate_path", rmw_qos_profile_services_default, cb_group_);
+    generate_trajectory_client = this->create_client<autonomous_navigation_msgs::srv::PathGenerator>("generate_path", rmw_qos_profile_services_default, cb_group_);
     mavros_arm_client_ = this->create_client<mavros_msgs::srv::CommandBool>("/mavros/cmd/arming", rmw_qos_profile_services_default, cb_group_);
     mavros_set_mode_client_ = this->create_client<mavros_msgs::srv::SetMode>("/mavros/set_mode", rmw_qos_profile_services_default, cb_group_);
     start_trajectory_srv = this->create_service<std_srvs::srv::SetBool>("start_trajectory", std::bind(&TrajectoryController::start_trajectory_cb, this, std::placeholders::_1, std::placeholders::_2));
@@ -71,7 +81,7 @@ TrajectoryController::~TrajectoryController()
         alt_file_.close();
     }
     RCLCPP_INFO(this->get_logger(), "Disarming the robot before shutdown");
-    if(disarm()){
+    if(set_arm(false)){
         rclcpp::shutdown();
     }
 
@@ -82,7 +92,15 @@ void TrajectoryController::start_trajectory_cb(const std::shared_ptr<std_srvs::s
     if (request->data) {
         RCLCPP_INFO(this->get_logger(), "Starting trajectory following");
         set_origin_ = false; // Reset the origin to get the current position as the new origin
-        auto req = std::make_shared<std_srvs::srv::Trigger::Request>();
+        auto req = std::make_shared<autonomous_navigation_msgs::srv::PathGenerator::Request>();
+        req->delta = this->get_parameter("delta").as_double();
+        req->side = this->get_parameter("side").as_double();
+        req->radius = this->get_parameter("radius").as_double();
+        req->dz = this->get_parameter("dz").as_double();
+        req->turns = this->get_parameter("turns").as_int();
+        req->depth = this->get_parameter("depth").as_int();
+        req->path_type = this->get_parameter("path_type").as_int();
+
         auto future = generate_trajectory_client->async_send_request(req);
 
         // Wait for the future safely (since the callback group is Reentrant)
@@ -102,7 +120,7 @@ void TrajectoryController::start_trajectory_cb(const std::shared_ptr<std_srvs::s
             }
     } else {
         RCLCPP_INFO(this->get_logger(), "Stopping trajectory following");
-
+        follow_path = request->data; 
         publish_rc(0.0, 0.0, 0.0, 0.0); // Stop the robot
     }
     response->success = true;
@@ -118,35 +136,27 @@ void TrajectoryController::state_cb(const mavros_msgs::msg::State::ConstSharedPt
 
 bool TrajectoryController::set_arm(bool arm)
 {
+    if (!connected_) {
+        RCLCPP_ERROR(this->get_logger(), "ROV not connected, cannot change arm state");
+        return false; 
+    }
     auto request = std::make_shared<mavros_msgs::srv::CommandBool::Request>();
     request->value = arm;
     // call mavros/cmd/arming
     if(mavros_arm_client_->service_is_ready()) {
         mavros_arm_client_->async_send_request(request);
-        RCLCPP_INFO_ONCE(this->get_logger(), "Robot Armed");
+        RCLCPP_INFO_ONCE(this->get_logger(), arm ? "ROV armed" : "ROV disarmed");
         return true;
     }
     return false;
 }
 
-bool TrajectoryController::disarm()
-{
-    if (!connected_) {
-        return false; 
-    }
-    if (armed_) {
-        bool result = set_arm(false);
-        if (result) {
-        RCLCPP_INFO(this->get_logger(), "ROV disarmed");
-        }
-        return result;
-    }
-
-    return true;
-}
-
 bool TrajectoryController::set_mode(const std::string & mode)
 {
+    if(!connected_) {
+        RCLCPP_ERROR(this->get_logger(), "ROV not connected, cannot change mode");
+        return false; 
+    }
     auto request = std::make_shared<mavros_msgs::srv::SetMode::Request>();
     request->custom_mode = mode;
     if(mavros_set_mode_client_->service_is_ready()) {
@@ -268,6 +278,33 @@ void TrajectoryController::transformPath(const nav_msgs::msg::Path::ConstSharedP
 
         });
     }
+
+    if (!path_transformed_.empty())
+    {
+        double sum_x = 0.0;
+        double sum_y = 0.0;
+        double sum_z = 0.0;
+
+        for (const auto &p : path_transformed_)
+        {
+            sum_x += p.x;
+            sum_y += p.y;
+            sum_z += p.z;
+        }
+
+        size_t n = path_transformed_.size();
+        duct_position_.pdx = sum_x / n;
+        duct_position_.pdy = sum_y / n;
+        duct_position_.pdz = sum_z / n;
+
+        RCLCPP_INFO(this->get_logger(), 
+            "Calculated Path Center / Duct Position: [x: %.3f, y: %.3f, z: %.3f]", 
+            duct_position_.pdx, duct_position_.pdy, duct_position_.pdz);
+    }
+    else
+    {
+        RCLCPP_WARN(this->get_logger(), "Received path is empty. Duct position was not updated.");
+    }
     if(this->get_parameter("debug_mode").as_bool())
     {
         for (const auto &p : path_transformed_)
@@ -351,7 +388,7 @@ void TrajectoryController::pathFollower()
             return;
         }
         if (!armed_) {
-            RCLCPP_WARN(this->get_logger(), "ROV not armed, arming now");
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *  this->get_clock(), 500, "ROV not armed, arming now");
             set_arm(true);
             return;
         }
@@ -364,8 +401,8 @@ void TrajectoryController::pathFollower()
     }
 
     waypoint target = path_transformed_[trajectory_index_];
-    // tf2::Quaternion q_desired = lookAtTheDuct(current_pose_.pose.position);
-    tf2::Quaternion q_desired(0.0, 0.0, 0.0, 1.0); // No rotation for now
+    tf2::Quaternion q_desired = lookAtTheDuct(current_pose_.pose.position);
+    // tf2::Quaternion q_desired(0.0, 0.0, 0.0, 1.0); // No rotation for now
 
     // Current Pose
     double current_x = current_pose_.pose.position.x;

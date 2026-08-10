@@ -17,8 +17,8 @@ def generate_launch_description():
         DeclareLaunchArgument('dz', default_value='-1.0', description='Vertical step size of the spiral'),
         DeclareLaunchArgument('turns', default_value='4', description='Number of spiral'),
         DeclareLaunchArgument('depth', default_value='4', description='Depth of the serpetine path'),
-        DeclareLaunchArgument('path_type', default_value='circle', description='shape of the trajectory'),
-        DeclareLaunchArgument('namespace', default_value=['Navigation'], description='Namespace'),
+        DeclareLaunchArgument('path_type', default_value='1', description='shape of the trajectory'),
+        DeclareLaunchArgument('namespace', default_value=['navigation'], description='Namespace'),
 
         Node(
             package='autonomous_navigation',
@@ -27,13 +27,6 @@ def generate_launch_description():
             namespace=LaunchConfiguration('namespace'),
             output='screen',
             parameters=[{'frame_id': LaunchConfiguration('frame_id')},
-                        {'delta': LaunchConfiguration('delta')},
-                        {'side': LaunchConfiguration('side')},
-                        {'radius': LaunchConfiguration('radius')},
-                        {'dz': LaunchConfiguration('dz')},
-                        {'turns': LaunchConfiguration('turns')},
-                        {'depth': LaunchConfiguration('depth')},
-                        {'path_type': LaunchConfiguration('path_type')}
                         ],
         ),
 
@@ -43,7 +36,15 @@ def generate_launch_description():
             name='trajectory_controller',
             namespace=LaunchConfiguration('namespace'),
             output='screen',
-            parameters=[{'duct_x': LaunchConfiguration('duct_x')},
+            parameters=[
+                        {'delta': LaunchConfiguration('delta')},
+                        {'side': LaunchConfiguration('side')},
+                        {'radius': LaunchConfiguration('radius')},
+                        {'dz': LaunchConfiguration('dz')},
+                        {'turns': LaunchConfiguration('turns')},
+                        {'depth': LaunchConfiguration('depth')},
+                        {'path_type': LaunchConfiguration('path_type')},
+                        {'duct_x': LaunchConfiguration('duct_x')},
                         {'duct_y': LaunchConfiguration('duct_y')},
                         {'duct_z': LaunchConfiguration('duct_z')},
                         {'kp': LaunchConfiguration('kp')},
