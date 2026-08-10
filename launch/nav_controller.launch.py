@@ -10,10 +10,9 @@ def generate_launch_description():
         DeclareLaunchArgument('duct_y', default_value='1.5', description='Duct position along the Y-axis'),
         DeclareLaunchArgument('duct_z', default_value='-1.0', description='Duct position along the Z-axis'),
         DeclareLaunchArgument('delta', default_value='0.2', description='Distance between waypoints of the path'),
-        DeclareLaunchArgument('k_depth', default_value='5.0', description='Proportional gain for the depth controller'),
-        DeclareLaunchArgument('k_yaw', default_value='2.0', description='Proportional gain for the yaw controller'),
-        DeclareLaunchArgument('side', default_value='2.0', description='Side length of the square'),
-        DeclareLaunchArgument('radius', default_value='1.0', description='Radius of the circle or spiral'),
+        DeclareLaunchArgument('kp', default_value='1.5', description='Proportional gain for the proportional controller'),
+        DeclareLaunchArgument('side', default_value='2.15', description='Side length of the square'),
+        DeclareLaunchArgument('radius', default_value='1.35', description='Radius of the circle or spiral'),
         DeclareLaunchArgument('dz', default_value='-1.0', description='Vertical step size of the spiral'),
         DeclareLaunchArgument('turns', default_value='4', description='Number of spiral'),
         DeclareLaunchArgument('depth', default_value='4', description='Depth of the serpetine path'),
@@ -45,7 +44,9 @@ def generate_launch_description():
             output='screen',
             parameters=[{'duct_x': LaunchConfiguration('duct_x')},
                         {'duct_y': LaunchConfiguration('duct_y')},
-                        {'duct_z': LaunchConfiguration('duct_z')}
+                        {'duct_z': LaunchConfiguration('duct_z')},
+                        {'kp': LaunchConfiguration('kp')},
+                        {'ki': LaunchConfiguration('ki')}
                         ],
         )
     ])

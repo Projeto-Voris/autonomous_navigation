@@ -8,26 +8,35 @@ TrajectoryController::TrajectoryController() : Node("trajectory_controller")
     this->declare_parameter<double>("duct_x", 3.0);
     this->declare_parameter<double>("duct_y", 1.5);
     this->declare_parameter<double>("duct_z", -1.0);
-    this->declare_parameter<double>("k_depth", 5.0);
-    this->declare_parameter<double>("k_yaw", 2.0);
+    this->declare_parameter<double>("kp", 2.0);
+    this->declare_parameter<double>("ki", 1.0);
 
     this->get_parameter("frame_id", frame_id_);
     this->get_parameter("duct_x", duct_position_.pdx);
     this->get_parameter("duct_y", duct_position_.pdy);
     this->get_parameter("duct_z", duct_position_.pdz);
-    k_depth = this->get_parameter("k_depth").as_double();
-    k_yaw = this->get_parameter("k_yaw").as_double();
+    kp = this->get_parameter("kp").as_double();
+
+    slam_file_.open("/home/biancarosa/Documents/logs_auv/slam_pose.txt");
+    odom_file_.open("/home/biancarosa/Documents/logs_auv/odometry.txt");
+    wp_file_.open("/home/biancarosa/Documents/logs_auv/wp_file_.txt");
+    alt_file_.open("/home/biancarosa/Documents/logs_auv/alt_file_.txt");
 
     rc_pub_ = this->create_publisher<mavros_msgs::msg::OverrideRCIn>("/mavros/rc/override", 10);
     path_pub_ = this->create_publisher<nav_msgs::msg::Path>("transformed_path", 10);
     mavros_arm_client_ = this->create_client<mavros_msgs::srv::CommandBool>("/mavros/cmd/arming");
     mavros_set_mode_client_ = this->create_client<mavros_msgs::srv::SetMode>("/mavros/set_mode");
-    odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>("/model/bluerov2/odometry", 10, std::bind(&TrajectoryController::odom_cb, this, std::placeholders::_1));
+    slam_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>("/mavros/vision_pose/pose", 10, std::bind(&TrajectoryController::slam_cb, this, std::placeholders::_1));
     state_sub_ = this->create_subscription<mavros_msgs::msg::State>("/mavros/state", 10, std::bind(&TrajectoryController::state_cb, this, std::placeholders::_1));
     path_sub_ = this->create_subscription<nav_msgs::msg::Path>("local_path", 10, std::bind(&TrajectoryController::transformPath, this, std::placeholders::_1));
+    alt_sub_ = this->create_subscription<mavros_msgs::msg::VfrHud>("/mavros/vfr_hud", 10, std::bind(&TrajectoryController::alt_cb, this, std::placeholders::_1));
     timer_ = this->create_wall_timer(std::chrono::milliseconds(100), [this]() {pathFollower();});
+
+    rclcpp::QoS qos(rclcpp::KeepLast(10));
+    qos.best_effort();
+    odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>("/mavros/local_position/odom", qos, std::bind(&TrajectoryController::odom_cb, this, std::placeholders::_1));
     
-    gain_ = 0.5;
+    gain_ = 0.3;
     trajectory_index_ = 0;
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -103,7 +112,7 @@ void TrajectoryController::publish_rc(float forward, float lateral, float depth,
     rc_msg.channels[4 - 1] = map_pwm(yaw,true, 0.1); // Yaw
     rc_msg.channels[3 - 1] = map_pwm(depth,false, 0.1); // Depth
 
-    // RCLCPP_INFO(this->get_logger(), "yaw:%4d | depth:%4d ", rc_msg.channels[4 - 1], rc_msg.channels[3 - 1]);
+    RCLCPP_INFO(this->get_logger(), "forw:%4d | lat:%4d | yaw:%4d | depth:%4d ", rc_msg.channels[5 - 1], rc_msg.channels[6 - 1], rc_msg.channels[4 - 1], rc_msg.channels[3 - 1]);
 
     rc_pub_->publish(rc_msg);
 }
@@ -135,6 +144,8 @@ void TrajectoryController::odom_cb(const nav_msgs::msg::Odometry::ConstSharedPtr
     // velocity (linear and angular)
     current_vel_ = msg->twist.twist;
 
+    // RCLCPP_INFO_THROTTLE(get_logger(),*get_clock(),500,"x = %.3f",current_pose_.pose.position.x);
+
     if (!set_origin_)
     {
         origin_x_ = current_pose_.pose.position.x;
@@ -155,6 +166,13 @@ void TrajectoryController::odom_cb(const nav_msgs::msg::Odometry::ConstSharedPtr
         RCLCPP_INFO_ONCE(this->get_logger(), "origin_x:%4f | origin_y:%4f | origin_z:%4f", origin_x_, origin_y_,origin_z_);
     }
     RCLCPP_INFO_ONCE(this->get_logger(), "header_frame_id:%s ", current_pose_.header.frame_id.c_str());
+
+    odom_file_ << msg->pose.pose.position.x << " " << msg->pose.pose.position.y << " " << msg->pose.pose.position.z << " " << msg->pose.pose.orientation.x << " " << msg->pose.pose.orientation.y << " " << msg->pose.pose.orientation.z << " " << msg->pose.pose.orientation.w << '\n';
+}
+
+void TrajectoryController::slam_cb(const geometry_msgs::msg::PoseStamped::ConstSharedPtr & msg)
+{
+    slam_file_ << msg->pose.position.x << " " << msg->pose.position.y << " " << msg->pose.position.z << " " << msg->pose.orientation.x << " " << msg->pose.orientation.y << " " << msg->pose.orientation.z << " " << msg->pose.orientation.w << '\n';
 }
 
 void TrajectoryController::transformPath(const nav_msgs::msg::Path::ConstSharedPtr & msg)
@@ -163,9 +181,12 @@ void TrajectoryController::transformPath(const nav_msgs::msg::Path::ConstSharedP
 
     for (const auto &p : msg->poses)
     {
+        // wp_file_ << p.pose.position.x << " " << p.pose.position.y << " " << p.pose.position.z << "\n";
+        // wp_file_ << std::endl;
         tf2::Vector3 pt(p.pose.position.x, p.pose.position.y, p.pose.position.z);
 
-        tf2::Vector3 pt_map = T_map_start * pt;
+        // tf2::Vector3 pt_map = T_map_start * pt;
+        tf2::Vector3 pt_map(pt.x() + origin_x_, pt.y() + origin_y_, pt.z() + origin_z_);
 
         path_transformed_.push_back({
             pt_map.x(),
@@ -174,7 +195,18 @@ void TrajectoryController::transformPath(const nav_msgs::msg::Path::ConstSharedP
 
         });
     }
+
+    for (const auto &p : path_transformed_)
+    {
+        wp_file_ << p.x << " " << p.y << " " << p.z << "\n";
+    }
+    wp_file_ << std::endl;
     publishPath();
+}
+
+void TrajectoryController::alt_cb(const mavros_msgs::msg::VfrHud::ConstSharedPtr & msg)
+{
+    alt_file_ << msg->altitude << '\n';
 }
 
 tf2::Quaternion TrajectoryController::lookAtTheDuct(const geometry_msgs::msg::Point& robot_position)
@@ -275,19 +307,14 @@ void TrajectoryController::pathFollower()
     double error_forward = std::cos(current_yaw)*error_x + std::sin(current_yaw)*error_y;
     double error_lateral = -std::sin(current_yaw)*error_x + std::cos(current_yaw)*error_y;
 
-    double forward_cmd = 0.3*error_forward;
-    double lateral_cmd = 0.3*error_lateral;
-    double depth_cmd = k_depth*error_z;
-    double yaw_cmd = k_yaw*yaw;
-
-    forward_cmd = std::clamp(forward_cmd,-0.3,0.3);
-    lateral_cmd = std::clamp(lateral_cmd,-0.3,0.3);
-    depth_cmd = std::clamp(depth_cmd,-k_depth,k_depth);
-    yaw_cmd = std::clamp(yaw_cmd, -k_yaw, k_yaw);
+    double forward_cmd = kp*error_forward;
+    double lateral_cmd = kp*error_lateral;
+    double depth_cmd = kp*error_z;
+    double yaw_cmd = kp*yaw;
 
     // Euclidean distance
-    double distance = std::hypot(error_x,error_y);
-    float threshold = 0.8;
+    double distance = std::hypot(error_x,error_y, error_z);
+    float threshold = 0.3;
 
     if (distance < threshold)
     {

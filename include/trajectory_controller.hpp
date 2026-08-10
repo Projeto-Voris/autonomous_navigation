@@ -5,11 +5,14 @@
 #include <string>
 #include <vector>
 #include <cmath>
+#include <fstream>
+#include "rosidl_runtime_cpp/traits.hpp"
 
 #include <rclcpp/rclcpp.hpp>
 #include "mavros_msgs/msg/override_rc_in.hpp"
 #include "mavros_msgs/srv/command_bool.hpp"
 #include "mavros_msgs/srv/set_mode.hpp"
+#include "mavros_msgs/msg/vfr_hud.hpp"
 #include "mavros_msgs/msg/state.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
@@ -49,10 +52,17 @@ private:
     rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
     void transformPath(const nav_msgs::msg::Path::ConstSharedPtr & msg);
 
+    rclcpp::Subscription<mavros_msgs::msg::VfrHud>::SharedPtr alt_sub_;
+    void alt_cb(const mavros_msgs::msg::VfrHud::ConstSharedPtr & msg);
+
+    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr slam_sub_;
+    void slam_cb(const geometry_msgs::msg::PoseStamped::ConstSharedPtr & msg);
+
     // Current robot state
     geometry_msgs::msg::PoseStamped current_pose_;
     geometry_msgs::msg::Twist current_vel_;
     geometry_msgs::msg::PoseStamped pose_odom_;
+    rclcpp::Time last_time_;
 
     rclcpp::Publisher<mavros_msgs::msg::OverrideRCIn>::SharedPtr rc_pub_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
@@ -98,12 +108,16 @@ private:
         double z;
     };
 
-    double k_depth;
-    double k_yaw;
+    double kp;
     
     std::vector<waypoint> path_transformed_;
     size_t trajectory_index_;
     std::string frame_id_;
+
+    std::ofstream slam_file_;
+    std::ofstream odom_file_;
+    std::ofstream wp_file_;
+    std::ofstream alt_file_;
 };
 
 #endif // TRAJECTORY_CONTROLLER_HPP

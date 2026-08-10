@@ -91,27 +91,32 @@ void PathGenerate::squareGenerate()
     double L = path_params_.side;
     double d = path_params_.delta;
     double h = L/2;
+    double dz = path_params_.dz;
+
     for (double y = 0; y <= h; y += d)
-        wp_.push_back({0,y,0});
+        wp_.push_back({0,y,dz});
     for (double x = d; x <= L; x += d)
-        wp_.push_back({x,h,0});
+        wp_.push_back({x,h,dz});
     for (double y = h-d; y >= -h; y -= d)
-        wp_.push_back({L,y,0});
+        wp_.push_back({L,y,dz});
     for (double x = L-d; x >= 0; x -= d)
-        wp_.push_back({x,-h,0});
-    for (double y = -h+d; y < 0; y += d)
-        wp_.push_back({0,y,0});
+        wp_.push_back({x,-h,dz});
+    for (double y = -h+d; y <= 0; y += d)
+        wp_.push_back({0,y,dz});
 }
 
 void PathGenerate::circleGenerate()
 {
     // Generate a circle trajectory with the center in (r,0)
     double r = path_params_.radius;
+    double dz = path_params_.dz;
+
     int N = std::ceil((2*M_PI*r)/path_params_.delta);
-    for (int i=0; i<N; i++)
+
+    for (int i=0; i<=N; i++)
     {
         double theta = 2*M_PI*i/N;
-        wp_.push_back({r-r*cos(theta), r*sin(theta), 0.0});
+        wp_.push_back({r-r*cos(theta), r*sin(theta), dz});
     }
 }
 
@@ -141,13 +146,13 @@ void PathGenerate::serpentineGenerate()
     double h = L/2;
 
     // Go down
-    for (double z = 0; z >= -w; z -= d)
+    for (double z = 0; z > -w; z -= d)
         wp_.push_back({0, 0, z});
     // Go right
     for (double y = d; y <= h; y += d)
         wp_.push_back({0, y, -w});
     // Go up
-    for (double z = -w+d; z <= 0; z += d)
+    for (double z = -w+d; z < 0; z += d)
         wp_.push_back({0, h, z});
 }
 
@@ -176,7 +181,7 @@ void PathGenerate::generatePath()
     path_.clear();
 
     // Transform the trajectory into points
-    constexpr int sample = 100; // Define the number of point that will be get
+    constexpr int sample = 200; // Define the number of point that will be get
     for (int i = 0; i <= sample; i++)
     {
         // Normalization to u between 0 and 1, spline eigen wait u between [0,1], evaluate where is the point 
