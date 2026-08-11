@@ -231,9 +231,15 @@ void TrajectoryController::odom_cb(const nav_msgs::msg::Odometry::ConstSharedPtr
 
         // Transformation to the start position
         T_map_start.setOrigin(tf2::Vector3(origin_x_,origin_y_,origin_z_));
-        tf2::Quaternion q;
-        tf2::fromMsg(current_pose_.pose.orientation, q);
-        T_map_start.setRotation(q);
+        double initial_yaw = tf2::getYaw(current_pose_.pose.orientation);
+
+        // Construct a pure Yaw quaternion (Roll = 0, Pitch = 0, Yaw = initial_yaw)
+        tf2::Quaternion q_yaw_only;
+        q_yaw_only.setRPY(0.0, 0.0, initial_yaw);
+
+        // Assign pure Yaw rotation to T_map_start
+        T_map_start.setRotation(q_yaw_only);
+
         T_start_map_ = T_map_start.inverse();
 
         set_origin_ = true;
@@ -268,8 +274,8 @@ void TrajectoryController::transformPath(const nav_msgs::msg::Path::ConstSharedP
         // wp_file_ << std::endl;
         tf2::Vector3 pt(p.pose.position.x, p.pose.position.y, p.pose.position.z);
 
-        // tf2::Vector3 pt_map = T_map_start * pt;
-        tf2::Vector3 pt_map(pt.x() + origin_x_, pt.y() + origin_y_, pt.z() + origin_z_);
+        tf2::Vector3 pt_map = T_map_start * pt;
+        // tf2::Vector3 pt_map(pt.x() + origin_x_, pt.y() + origin_y_, pt.z() + origin_z_);
 
         path_transformed_.push_back({
             pt_map.x(),
