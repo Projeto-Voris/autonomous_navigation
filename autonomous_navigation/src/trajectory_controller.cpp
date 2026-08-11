@@ -5,11 +5,22 @@
 TrajectoryController::TrajectoryController() : Node("trajectory_controller")
 {
     this->declare_parameter<std::string>("frame_id", "map");
+
+    this->declare_parameter<double>("delta", 0.2);
+    this->declare_parameter<double>("side", 2.0);
+    this->declare_parameter<double>("radius", 1.0);
+    this->declare_parameter<double>("dz", -1.0);
+    this->declare_parameter<int>("turns", 4);
+    this->declare_parameter<int>("depth", 4);
+    this->declare_parameter<int>("path_type", 0);
+
     this->declare_parameter<double>("duct_x", 3.0);
     this->declare_parameter<double>("duct_y", 1.5);
     this->declare_parameter<double>("duct_z", -1.0);
     this->declare_parameter<double>("kp", 2.0);
     this->declare_parameter<double>("ki", 1.0);
+    
+    this->declare_parameter<bool>("debug_mode", false);
 
     this->get_parameter("frame_id", frame_id_);
     this->get_parameter("duct_x", duct_position_.pdx);
@@ -17,24 +28,42 @@ TrajectoryController::TrajectoryController() : Node("trajectory_controller")
     this->get_parameter("duct_z", duct_position_.pdz);
     kp = this->get_parameter("kp").as_double();
 
-    slam_file_.open("/home/biancarosa/Documents/logs_auv/slam_pose.txt");
-    odom_file_.open("/home/biancarosa/Documents/logs_auv/odometry.txt");
-    wp_file_.open("/home/biancarosa/Documents/logs_auv/wp_file_.txt");
-    alt_file_.open("/home/biancarosa/Documents/logs_auv/alt_file_.txt");
+    if(this->get_parameter("debug_mode").as_bool())
+    {
+        RCLCPP_INFO(this->get_logger(), "Debug mode enabled");
+        slam_file_.open("/home/biancarosa/Documents/logs_auv/slam_pose.txt");
+        odom_file_.open("/home/biancarosa/Documents/logs_auv/odometry.txt");
+        wp_file_.open("/home/biancarosa/Documents/logs_auv/wp_file_.txt");
+        alt_file_.open("/home/biancarosa/Documents/logs_auv/alt_file_.txt");
+    }
 
     rc_pub_ = this->create_publisher<mavros_msgs::msg::OverrideRCIn>("/mavros/rc/override", 10);
     path_pub_ = this->create_publisher<nav_msgs::msg::Path>("transformed_path", 10);
-    mavros_arm_client_ = this->create_client<mavros_msgs::srv::CommandBool>("/mavros/cmd/arming");
-    mavros_set_mode_client_ = this->create_client<mavros_msgs::srv::SetMode>("/mavros/set_mode");
+
+    cb_group_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    cb_group_timer_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    cb_group_sub_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+
+
+    generate_trajectory_client = this->create_client<autonomous_navigation_msgs::srv::PathGenerator>("generate_path", rmw_qos_profile_services_default, cb_group_);
+    mavros_arm_client_ = this->create_client<mavros_msgs::srv::CommandBool>("/mavros/cmd/arming", rmw_qos_profile_services_default, cb_group_);
+    mavros_set_mode_client_ = this->create_client<mavros_msgs::srv::SetMode>("/mavros/set_mode", rmw_qos_profile_services_default, cb_group_);
+    start_trajectory_srv = this->create_service<std_srvs::srv::SetBool>("start_trajectory", std::bind(&TrajectoryController::start_trajectory_cb, this, std::placeholders::_1, std::placeholders::_2));
+
+
     slam_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>("/mavros/vision_pose/pose", 10, std::bind(&TrajectoryController::slam_cb, this, std::placeholders::_1));
     state_sub_ = this->create_subscription<mavros_msgs::msg::State>("/mavros/state", 10, std::bind(&TrajectoryController::state_cb, this, std::placeholders::_1));
     path_sub_ = this->create_subscription<nav_msgs::msg::Path>("local_path", 10, std::bind(&TrajectoryController::transformPath, this, std::placeholders::_1));
     alt_sub_ = this->create_subscription<mavros_msgs::msg::VfrHud>("/mavros/vfr_hud", 10, std::bind(&TrajectoryController::alt_cb, this, std::placeholders::_1));
-    timer_ = this->create_wall_timer(std::chrono::milliseconds(100), [this]() {pathFollower();});
+    
+    
+    timer_ = this->create_wall_timer(std::chrono::milliseconds(100), std::bind(&TrajectoryController::pathFollower, this), cb_group_timer_);
 
     rclcpp::QoS qos(rclcpp::KeepLast(10));
     qos.best_effort();
-    odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>("/mavros/local_position/odom", qos, std::bind(&TrajectoryController::odom_cb, this, std::placeholders::_1));
+    rclcpp::SubscriptionOptions sub_options;
+    sub_options.callback_group = cb_group_sub_;
+    odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>("/mavros/local_position/odom", qos, std::bind(&TrajectoryController::odom_cb, this, std::placeholders::_1), sub_options  );
     
     gain_ = 0.3;
     trajectory_index_ = 0;
@@ -42,6 +71,62 @@ TrajectoryController::TrajectoryController() : Node("trajectory_controller")
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 }
 
+TrajectoryController::~TrajectoryController()
+{
+    if(this->get_parameter("debug_mode").as_bool())
+    {
+        slam_file_.close();
+        odom_file_.close();
+        wp_file_.close();
+        alt_file_.close();
+    }
+    RCLCPP_INFO(this->get_logger(), "Disarming the robot before shutdown");
+    if(set_arm(false)){
+        rclcpp::shutdown();
+    }
+
+}
+
+void TrajectoryController::start_trajectory_cb(const std::shared_ptr<std_srvs::srv::SetBool::Request> request, std::shared_ptr<std_srvs::srv::SetBool::Response> response)
+{
+    if (request->data) {
+        RCLCPP_INFO(this->get_logger(), "Starting trajectory following");
+        set_origin_ = false; // Reset the origin to get the current position as the new origin
+        auto req = std::make_shared<autonomous_navigation_msgs::srv::PathGenerator::Request>();
+        req->delta = this->get_parameter("delta").as_double();
+        req->side = this->get_parameter("side").as_double();
+        req->radius = this->get_parameter("radius").as_double();
+        req->dz = this->get_parameter("dz").as_double();
+        req->turns = this->get_parameter("turns").as_int();
+        req->depth = this->get_parameter("depth").as_int();
+        req->path_type = this->get_parameter("path_type").as_int();
+
+        auto future = generate_trajectory_client->async_send_request(req);
+
+        // Wait for the future safely (since the callback group is Reentrant)
+        if (future.wait_for(std::chrono::seconds(5)) == std::future_status::ready) {
+            auto result = future.get();
+            if (result->success) {
+                RCLCPP_INFO(this->get_logger(), "Trajectory generated successfully");
+                rclcpp::sleep_for(std::chrono::milliseconds(2000)); // Wait for a short duration to ensure the path is published
+                trajectory_index_ = 0;
+                follow_path = request->data; // Start following the path
+                response->success = true;
+                response->message = "Trajectory generated and started successfully";
+            } else {
+                RCLCPP_ERROR(this->get_logger(), "Failed to generate trajectory: %s", result->message.c_str());
+                response->success = false;
+                response->message = "Failed to generate trajectory: " + result->message;
+            }
+    } else {
+        RCLCPP_INFO(this->get_logger(), "Stopping trajectory following");
+        follow_path = request->data; 
+        publish_rc(0.0, 0.0, 0.0, 0.0); // Stop the robot
+    }
+    response->success = true;
+    response->message = follow_path ? "Trajectory following started" : "Trajectory following stopped";
+    }
+}
 void TrajectoryController::state_cb(const mavros_msgs::msg::State::ConstSharedPtr & msg)
 {
     connected_ = msg->connected;
@@ -51,35 +136,27 @@ void TrajectoryController::state_cb(const mavros_msgs::msg::State::ConstSharedPt
 
 bool TrajectoryController::set_arm(bool arm)
 {
+    if (!connected_) {
+        RCLCPP_ERROR(this->get_logger(), "ROV not connected, cannot change arm state");
+        return false; 
+    }
     auto request = std::make_shared<mavros_msgs::srv::CommandBool::Request>();
     request->value = arm;
     // call mavros/cmd/arming
     if(mavros_arm_client_->service_is_ready()) {
         mavros_arm_client_->async_send_request(request);
-        RCLCPP_INFO_ONCE(this->get_logger(), "Robot Armed");
+        RCLCPP_INFO_ONCE(this->get_logger(), arm ? "ROV armed" : "ROV disarmed");
         return true;
     }
     return false;
 }
 
-bool TrajectoryController::disarm()
-{
-    if (!connected_) {
-        return false; 
-    }
-    if (armed_) {
-        bool result = set_arm(false);
-        if (result) {
-        RCLCPP_INFO_ONCE(get_logger(), "Robot disarmed");
-        }
-        return result;
-    }
-
-    return true;
-}
-
 bool TrajectoryController::set_mode(const std::string & mode)
 {
+    if(!connected_) {
+        RCLCPP_ERROR(this->get_logger(), "ROV not connected, cannot change mode");
+        return false; 
+    }
     auto request = std::make_shared<mavros_msgs::srv::SetMode::Request>();
     request->custom_mode = mode;
     if(mavros_set_mode_client_->service_is_ready()) {
@@ -112,7 +189,7 @@ void TrajectoryController::publish_rc(float forward, float lateral, float depth,
     rc_msg.channels[4 - 1] = map_pwm(yaw,true, 0.1); // Yaw
     rc_msg.channels[3 - 1] = map_pwm(depth,false, 0.1); // Depth
 
-    RCLCPP_INFO(this->get_logger(), "forw:%4d | lat:%4d | yaw:%4d | depth:%4d ", rc_msg.channels[5 - 1], rc_msg.channels[6 - 1], rc_msg.channels[4 - 1], rc_msg.channels[3 - 1]);
+    // RCLCPP_INFO(this->get_logger(), "forw:%4d | lat:%4d | yaw:%4d | depth:%4d ", rc_msg.channels[5 - 1], rc_msg.channels[6 - 1], rc_msg.channels[4 - 1], rc_msg.channels[3 - 1]);
 
     rc_pub_->publish(rc_msg);
 }
@@ -167,12 +244,18 @@ void TrajectoryController::odom_cb(const nav_msgs::msg::Odometry::ConstSharedPtr
     }
     RCLCPP_INFO_ONCE(this->get_logger(), "header_frame_id:%s ", current_pose_.header.frame_id.c_str());
 
-    odom_file_ << msg->pose.pose.position.x << " " << msg->pose.pose.position.y << " " << msg->pose.pose.position.z << " " << msg->pose.pose.orientation.x << " " << msg->pose.pose.orientation.y << " " << msg->pose.pose.orientation.z << " " << msg->pose.pose.orientation.w << '\n';
+    if(this->get_parameter("debug_mode").as_bool())
+    {
+        odom_file_ << msg->pose.pose.position.x << " " << msg->pose.pose.position.y << " " << msg->pose.pose.position.z << " " << msg->pose.pose.orientation.x << " " << msg->pose.pose.orientation.y << " " << msg->pose.pose.orientation.z << " " << msg->pose.pose.orientation.w << '\n';
+    }   
 }
 
 void TrajectoryController::slam_cb(const geometry_msgs::msg::PoseStamped::ConstSharedPtr & msg)
 {
-    slam_file_ << msg->pose.position.x << " " << msg->pose.position.y << " " << msg->pose.position.z << " " << msg->pose.orientation.x << " " << msg->pose.orientation.y << " " << msg->pose.orientation.z << " " << msg->pose.orientation.w << '\n';
+    if(this->get_parameter("debug_mode").as_bool())
+    {
+        slam_file_ << msg->pose.position.x << " " << msg->pose.position.y << " " << msg->pose.position.z << " " << msg->pose.orientation.x << " " << msg->pose.orientation.y << " " << msg->pose.orientation.z << " " << msg->pose.orientation.w << '\n';
+    }
 }
 
 void TrajectoryController::transformPath(const nav_msgs::msg::Path::ConstSharedPtr & msg)
@@ -196,17 +279,49 @@ void TrajectoryController::transformPath(const nav_msgs::msg::Path::ConstSharedP
         });
     }
 
-    for (const auto &p : path_transformed_)
+    if (!path_transformed_.empty())
     {
-        wp_file_ << p.x << " " << p.y << " " << p.z << "\n";
+        double sum_x = 0.0;
+        double sum_y = 0.0;
+        double sum_z = 0.0;
+
+        for (const auto &p : path_transformed_)
+        {
+            sum_x += p.x;
+            sum_y += p.y;
+            sum_z += p.z;
+        }
+
+        size_t n = path_transformed_.size();
+        duct_position_.pdx = sum_x / n;
+        duct_position_.pdy = sum_y / n;
+        duct_position_.pdz = sum_z / n;
+
+        RCLCPP_INFO(this->get_logger(), 
+            "Calculated Path Center / Duct Position: [x: %.3f, y: %.3f, z: %.3f]", 
+            duct_position_.pdx, duct_position_.pdy, duct_position_.pdz);
     }
-    wp_file_ << std::endl;
+    else
+    {
+        RCLCPP_WARN(this->get_logger(), "Received path is empty. Duct position was not updated.");
+    }
+    if(this->get_parameter("debug_mode").as_bool())
+    {
+        for (const auto &p : path_transformed_)
+        {
+            wp_file_ << p.x << " " << p.y << " " << p.z << "\n";
+        }
+        wp_file_ << std::endl;
+    }
     publishPath();
 }
 
 void TrajectoryController::alt_cb(const mavros_msgs::msg::VfrHud::ConstSharedPtr & msg)
 {
-    alt_file_ << msg->altitude << '\n';
+    if(this->get_parameter("debug_mode").as_bool())
+    {
+        alt_file_ << msg->altitude << '\n';
+    }
 }
 
 tf2::Quaternion TrajectoryController::lookAtTheDuct(const geometry_msgs::msg::Point& robot_position)
@@ -253,15 +368,19 @@ tf2::Quaternion TrajectoryController::lookAtTheDuct(const geometry_msgs::msg::Po
 
 void TrajectoryController::pathFollower()
 {
+
+    if (!follow_path) { 
+        return;}
+
     if (trajectory_index_>= path_transformed_.size()) {
-        RCLCPP_INFO_ONCE(get_logger(), "Trajectory completed");
-        disarm();
+        RCLCPP_INFO(this->get_logger(), "Trajectory completed");
+        // disarm();
         publish_rc(0.0, 0.0, 0.0, 0.0);
+        follow_path = false;
         return;
     } else {
-        RCLCPP_INFO_ONCE(get_logger(), "Starting follow waypoints");
         if (!connected_) {
-            RCLCPP_INFO_ONCE(get_logger(), "Robot not connected");
+            RCLCPP_ERROR(this->get_logger(), "ROV not connected");
             return;
         }
         if (mode_!= "ALT_HOLD") {
@@ -269,6 +388,7 @@ void TrajectoryController::pathFollower()
             return;
         }
         if (!armed_) {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *  this->get_clock(), 500, "ROV not armed, arming now");
             set_arm(true);
             return;
         }
@@ -279,8 +399,10 @@ void TrajectoryController::pathFollower()
         RCLCPP_ERROR(this->get_logger(), "Trajectory is empty");
         return;
     }
+
     waypoint target = path_transformed_[trajectory_index_];
     tf2::Quaternion q_desired = lookAtTheDuct(current_pose_.pose.position);
+    // tf2::Quaternion q_desired(0.0, 0.0, 0.0, 1.0); // No rotation for now
 
     // Current Pose
     double current_x = current_pose_.pose.position.x;
@@ -324,22 +446,19 @@ void TrajectoryController::pathFollower()
     publish_rc(forward_cmd, lateral_cmd, depth_cmd, yaw_cmd);
 }
 
-std::shared_ptr<TrajectoryController> TrajectoryController::instance = nullptr;
-void TrajectoryController::sigintHandler(int)
-{
-    if (instance){
-        instance->disarm();
-    }
-    rclcpp::shutdown();
-}
 
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
     auto node = std::make_shared<TrajectoryController>(); 
-    TrajectoryController::instance = node;
-    std::signal(SIGINT, TrajectoryController::sigintHandler);
-    rclcpp::spin(node); 
+    // TrajectoryController::instance = node;
+    // std::signal(SIGINT, TrajectoryController::sigintHandler);
+
+    // Substitua o rclcpp::spin(node) por MultiThreadedExecutor:
+    rclcpp::executors::MultiThreadedExecutor executor;
+    executor.add_node(node);
+    executor.spin();
+
     rclcpp::shutdown();
     return 0;
 }

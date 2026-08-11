@@ -9,6 +9,8 @@
 #include "rosidl_runtime_cpp/traits.hpp"
 
 #include <rclcpp/rclcpp.hpp>
+#include <std_srvs/srv/set_bool.hpp>
+#include <autonomous_navigation_msgs/srv/path_generator.hpp>
 #include "mavros_msgs/msg/override_rc_in.hpp"
 #include "mavros_msgs/srv/command_bool.hpp"
 #include "mavros_msgs/srv/set_mode.hpp"
@@ -31,17 +33,20 @@ class TrajectoryController : public rclcpp::Node
 {
 public:
     TrajectoryController();
-    bool disarm();
+    ~TrajectoryController();
+    // bool disarm();
 
-    static std::shared_ptr<TrajectoryController> instance;
-    static void sigintHandler(int);
+    // static std::shared_ptr<TrajectoryController> instance;
+    // static void sigintHandler(int);
 
 private:
     bool connected_{};
     bool armed_{};
     bool set_origin_ = false;
+    bool follow_path = false;
     std::string mode_ = "";
     double gain_;
+
 
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     void odom_cb(const nav_msgs::msg::Odometry::ConstSharedPtr & msg);
@@ -57,7 +62,10 @@ private:
 
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr slam_sub_;
     void slam_cb(const geometry_msgs::msg::PoseStamped::ConstSharedPtr & msg);
-
+    
+    rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr start_trajectory_srv;
+    void start_trajectory_cb(const std::shared_ptr<std_srvs::srv::SetBool::Request> request, std::shared_ptr<std_srvs::srv::SetBool::Response> response);
+    
     // Current robot state
     geometry_msgs::msg::PoseStamped current_pose_;
     geometry_msgs::msg::Twist current_vel_;
@@ -67,8 +75,13 @@ private:
     rclcpp::Publisher<mavros_msgs::msg::OverrideRCIn>::SharedPtr rc_pub_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
 
+    rclcpp::Client<autonomous_navigation_msgs::srv::PathGenerator>::SharedPtr generate_trajectory_client;
     rclcpp::Client<mavros_msgs::srv::CommandBool>::SharedPtr mavros_arm_client_;
     rclcpp::Client<mavros_msgs::srv::SetMode>::SharedPtr mavros_set_mode_client_;   
+
+    rclcpp::CallbackGroup::SharedPtr cb_group_;
+    rclcpp::CallbackGroup::SharedPtr cb_group_timer_;
+    rclcpp::CallbackGroup::SharedPtr cb_group_sub_;
 
     rclcpp::TimerBase::SharedPtr timer_;
 
