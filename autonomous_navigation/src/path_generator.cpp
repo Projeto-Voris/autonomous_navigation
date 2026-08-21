@@ -27,7 +27,7 @@ void PathGenerate::generate_path_cb(const std::shared_ptr<autonomous_navigation_
     path_params_.turns = request->turns;
     path_params_.depth = request->depth;
     path_type_ = stringToPathType(request->path_type);
-    RCLCPP_INFO(this->get_logger(), "%s", path_type_ == PathType::SQUARE ? "SQUARE" : path_type_ == PathType::CIRCLE ? "CIRCLE" : path_type_ == PathType::SPIRAL ? "SPIRAL" : path_type_ == PathType::SERPENTINE ? "SERPENTINE" : "UNKNOWN");
+    RCLCPP_INFO(this->get_logger(), "%s", path_type_ == PathType::SQUARE ? "SQUARE" : path_type_ == PathType::CIRCLE ? "CIRCLE" : path_type_ == PathType::SPIRAL ? "SPIRAL" : path_type_ == PathType::SERPENTINE ? "SERPENTINE" : path_type_ == PathType::LINE ? "LINE" : "UNKNOWN");
     generatePath();
     response->success = true;
     response->message = "Path generated successfully";
@@ -69,6 +69,7 @@ PathType PathGenerate::stringToPathType(const int & type)
     if (type == 1) return PathType::CIRCLE;
     if (type == 2) return PathType::SPIRAL;
     if (type == 3) return PathType::SERPENTINE;
+    if (type == 4) return PathType::LINE;
 
     throw std::runtime_error("Unknown path type: " + std::to_string(type));
 }
@@ -95,6 +96,11 @@ void PathGenerate::waypointGenerate()
         case PathType::SERPENTINE:
         {
             serpentineGenerate();
+            break;
+        }
+        case PathType::LINE:
+        {
+            lineGenerate();
             break;
         }
     }
@@ -205,6 +211,16 @@ void PathGenerate::serpentineGenerate()
             }
         }
     }
+}
+
+void PathGenerate::lineGenerate()
+{
+    double L = path_params_.side;
+    double d = path_params_.delta;
+    double dz = path_params_.dz;
+
+    for (double x = 0; x <= L; x += d)
+        wp_.push_back({x,0,dz});
 }
 
 void PathGenerate::generatePath()

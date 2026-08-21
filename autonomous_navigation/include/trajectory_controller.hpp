@@ -71,6 +71,7 @@ private:
     geometry_msgs::msg::Twist current_vel_;
     geometry_msgs::msg::PoseStamped pose_odom_;
     rclcpp::Time last_time_;
+    rclcpp::Time time0_;
 
     rclcpp::Publisher<mavros_msgs::msg::OverrideRCIn>::SharedPtr rc_pub_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
@@ -122,6 +123,7 @@ private:
     };
 
     double kp;
+    double ki;
     
     std::vector<waypoint> path_transformed_;
     size_t trajectory_index_;
@@ -131,6 +133,13 @@ private:
     std::ofstream odom_file_;
     std::ofstream wp_file_;
     std::ofstream alt_file_;
+    std::ofstream control_;
+    std::ofstream time_;
+
+    double ef_integral_;
+    double el_integral_;
+    double ed_integral_;
+    double ey_integral_;
 };
 
 #endif // TRAJECTORY_CONTROLLER_HPP

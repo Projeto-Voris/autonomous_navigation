@@ -17,8 +17,8 @@ TrajectoryController::TrajectoryController() : Node("trajectory_controller")
     this->declare_parameter<double>("duct_x", 3.0);
     this->declare_parameter<double>("duct_y", 1.5);
     this->declare_parameter<double>("duct_z", -1.0);
-    this->declare_parameter<double>("kp", 2.0);
-    this->declare_parameter<double>("ki", 1.0);
+    this->declare_parameter<double>("kp", 1.125);
+    this->declare_parameter<double>("ki", 0.45);
     
     this->declare_parameter<bool>("debug_mode", false);
 
@@ -27,6 +27,7 @@ TrajectoryController::TrajectoryController() : Node("trajectory_controller")
     this->get_parameter("duct_y", duct_position_.pdy);
     this->get_parameter("duct_z", duct_position_.pdz);
     kp = this->get_parameter("kp").as_double();
+    ki = this->get_parameter("ki").as_double();
 
     if(this->get_parameter("debug_mode").as_bool())
     {
@@ -35,6 +36,8 @@ TrajectoryController::TrajectoryController() : Node("trajectory_controller")
         odom_file_.open("/home/biancarosa/Documents/logs_auv/odometry.txt");
         wp_file_.open("/home/biancarosa/Documents/logs_auv/wp_file_.txt");
         alt_file_.open("/home/biancarosa/Documents/logs_auv/alt_file_.txt");
+        control_.open("/home/biancarosa/Documents/logs_auv/control_.txt");
+        time_.open("/home/biancarosa/Documents/logs_auv/time_.txt");
     }
 
     rc_pub_ = this->create_publisher<mavros_msgs::msg::OverrideRCIn>("/mavros/rc/override", 10);
@@ -79,6 +82,8 @@ TrajectoryController::~TrajectoryController()
         odom_file_.close();
         wp_file_.close();
         alt_file_.close();
+        control_.close();
+        time_.close();
     }
     RCLCPP_INFO(this->get_logger(), "Disarming the robot before shutdown");
     if(set_arm(false)){
@@ -91,6 +96,8 @@ void TrajectoryController::start_trajectory_cb(const std::shared_ptr<std_srvs::s
 {
     if (request->data) {
         RCLCPP_INFO(this->get_logger(), "Starting trajectory following");
+        last_time_ = this->now();
+        time0_=this->now();
         set_origin_ = false; // Reset the origin to get the current position as the new origin
         auto req = std::make_shared<autonomous_navigation_msgs::srv::PathGenerator::Request>();
         req->delta = this->get_parameter("delta").as_double();
@@ -232,6 +239,10 @@ void TrajectoryController::odom_cb(const nav_msgs::msg::Odometry::ConstSharedPtr
         // Transformation to the start position
         T_map_start.setOrigin(tf2::Vector3(origin_x_,origin_y_,origin_z_));
         double initial_yaw = tf2::getYaw(current_pose_.pose.orientation);
+        // tf2::Quaternion q;
+        // tf2::fromMsg(current_pose_.pose.orientation, q);
+        // T_map_start.setRotation(q);
+        // T_start_map_ = T_map_start.inverse();
 
         // Construct a pure Yaw quaternion (Roll = 0, Pitch = 0, Yaw = initial_yaw)
         tf2::Quaternion q_yaw_only;
@@ -406,9 +417,19 @@ void TrajectoryController::pathFollower()
         return;
     }
 
+    rclcpp::Time now = this->now();
+    if (last_time_.nanoseconds() == 0)
+    {
+        last_time_ = now;
+        return;
+    }
+    double dt = (now - last_time_).seconds();
+    last_time_ = now;
+    double time = (now - time0_).seconds();
+
     waypoint target = path_transformed_[trajectory_index_];
-    tf2::Quaternion q_desired = lookAtTheDuct(current_pose_.pose.position);
-    // tf2::Quaternion q_desired(0.0, 0.0, 0.0, 1.0); // No rotation for now
+    // tf2::Quaternion q_desired = lookAtTheDuct(current_pose_.pose.position);
+    tf2::Quaternion q_desired(0.0, 0.0, 0.0, 1.0); // No rotation for now
 
     // Current Pose
     double current_x = current_pose_.pose.position.x;
@@ -435,10 +456,15 @@ void TrajectoryController::pathFollower()
     double error_forward = std::cos(current_yaw)*error_x + std::sin(current_yaw)*error_y;
     double error_lateral = -std::sin(current_yaw)*error_x + std::cos(current_yaw)*error_y;
 
-    double forward_cmd = kp*error_forward;
-    double lateral_cmd = kp*error_lateral;
-    double depth_cmd = kp*error_z;
-    double yaw_cmd = kp*yaw;
+    ef_integral_ += error_forward*dt;
+    el_integral_ += error_lateral*dt;
+    ed_integral_ += error_z*dt;
+    ey_integral_ += yaw*dt;
+
+    double forward_cmd = kp*error_forward + ki*ef_integral_;
+    double lateral_cmd = kp*error_lateral + ki*el_integral_;
+    double depth_cmd = kp*error_z + ki*ed_integral_;
+    double yaw_cmd = kp*yaw + ki*ey_integral_;
 
     // Euclidean distance
     double distance = std::hypot(error_x,error_y, error_z);
@@ -447,9 +473,16 @@ void TrajectoryController::pathFollower()
     if (distance < threshold)
     {
         trajectory_index_++;
+        ef_integral_ = 0.0;
+        el_integral_ = 0.0;
+        ed_integral_ = 0.0;
+        ey_integral_ = 0.0;
     }
 
     publish_rc(forward_cmd, lateral_cmd, depth_cmd, yaw_cmd);
+
+    control_ << forward_cmd << "\n";
+    time_ << time << "\n";
 }
 
 

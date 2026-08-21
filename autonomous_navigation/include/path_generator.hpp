@@ -31,7 +31,8 @@ enum class PathType
     SQUARE,
     CIRCLE,
     SPIRAL,
-    SERPENTINE
+    SERPENTINE,
+    LINE
 };
 
 class PathGenerate : public rclcpp::Node
@@ -53,6 +54,7 @@ private:
     void circleGenerate();
     void spiralGenerate();
     void serpentineGenerate();
+    void lineGenerate();
 
     struct waypoint
     {

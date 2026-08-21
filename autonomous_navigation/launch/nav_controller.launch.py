@@ -10,14 +10,15 @@ def generate_launch_description():
         DeclareLaunchArgument('duct_y', default_value='1.5', description='Duct position along the Y-axis'),
         DeclareLaunchArgument('duct_z', default_value='-1.0', description='Duct position along the Z-axis'),
         DeclareLaunchArgument('delta', default_value='0.2', description='Distance between waypoints of the path'),
-        DeclareLaunchArgument('kp', default_value='1.5', description='Proportional gain for the proportional controller'),
-        DeclareLaunchArgument('ki', default_value='1.0', description='Integral gain for the proportional controller'),
+        DeclareLaunchArgument('kp', default_value='1.125', description='Proportional gain for the proportional controller'),
+        DeclareLaunchArgument('ki', default_value='0.45', description='Integral gain for the proportional controller'),
         DeclareLaunchArgument('side', default_value='2.15', description='Side length of the square'),
         DeclareLaunchArgument('radius', default_value='1.35', description='Radius of the circle or spiral'),
         DeclareLaunchArgument('dz', default_value='-1.0', description='Vertical step size of the spiral'),
         DeclareLaunchArgument('turns', default_value='4', description='Number of spiral'),
         DeclareLaunchArgument('depth', default_value='4', description='Depth of the serpetine path'),
         DeclareLaunchArgument('path_type', default_value='1', description='shape of the trajectory'),
+        DeclareLaunchArgument('debug_mode', default_value='False', description=''),
         DeclareLaunchArgument('namespace', default_value=['navigation'], description='Namespace'),
 
         Node(
@@ -48,7 +49,8 @@ def generate_launch_description():
                         {'duct_y': LaunchConfiguration('duct_y')},
                         {'duct_z': LaunchConfiguration('duct_z')},
                         {'kp': LaunchConfiguration('kp')},
-                        {'ki': LaunchConfiguration('ki')}
+                        {'ki': LaunchConfiguration('ki')},
+                        {'debug_mode': LaunchConfiguration('debug_mode')}
                         ],
         )
     ])
