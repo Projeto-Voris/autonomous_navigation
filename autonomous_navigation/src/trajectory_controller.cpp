@@ -12,13 +12,14 @@ TrajectoryController::TrajectoryController() : Node("trajectory_controller")
     this->declare_parameter<double>("dz", -1.0);
     this->declare_parameter<int>("turns", 4);
     this->declare_parameter<int>("depth", 4);
+    this->declare_parameter<int>("points", 50);
     this->declare_parameter<int>("path_type", 0);
 
     this->declare_parameter<double>("duct_x", 3.0);
     this->declare_parameter<double>("duct_y", 1.5);
     this->declare_parameter<double>("duct_z", -1.0);
-    this->declare_parameter<double>("kp", 1.125);
-    this->declare_parameter<double>("ki", 0.45);
+    this->declare_parameter<double>("kp", 0.54);
+    this->declare_parameter<double>("ki", 0.162);
     
     this->declare_parameter<bool>("debug_mode", false);
 
@@ -106,6 +107,7 @@ void TrajectoryController::start_trajectory_cb(const std::shared_ptr<std_srvs::s
         req->dz = this->get_parameter("dz").as_double();
         req->turns = this->get_parameter("turns").as_int();
         req->depth = this->get_parameter("depth").as_int();
+        req->points = this->get_parameter("points").as_int();
         req->path_type = this->get_parameter("path_type").as_int();
 
         auto future = generate_trajectory_client->async_send_request(req);
@@ -239,10 +241,6 @@ void TrajectoryController::odom_cb(const nav_msgs::msg::Odometry::ConstSharedPtr
         // Transformation to the start position
         T_map_start.setOrigin(tf2::Vector3(origin_x_,origin_y_,origin_z_));
         double initial_yaw = tf2::getYaw(current_pose_.pose.orientation);
-        // tf2::Quaternion q;
-        // tf2::fromMsg(current_pose_.pose.orientation, q);
-        // T_map_start.setRotation(q);
-        // T_start_map_ = T_map_start.inverse();
 
         // Construct a pure Yaw quaternion (Roll = 0, Pitch = 0, Yaw = initial_yaw)
         tf2::Quaternion q_yaw_only;
@@ -285,8 +283,8 @@ void TrajectoryController::transformPath(const nav_msgs::msg::Path::ConstSharedP
         // wp_file_ << std::endl;
         tf2::Vector3 pt(p.pose.position.x, p.pose.position.y, p.pose.position.z);
 
-        tf2::Vector3 pt_map = T_map_start * pt;
-        // tf2::Vector3 pt_map(pt.x() + origin_x_, pt.y() + origin_y_, pt.z() + origin_z_);
+        // tf2::Vector3 pt_map = T_map_start * pt;
+        tf2::Vector3 pt_map(pt.x() + origin_x_, pt.y() + origin_y_, pt.z() + origin_z_);
 
         path_transformed_.push_back({
             pt_map.x(),
@@ -424,8 +422,7 @@ void TrajectoryController::pathFollower()
         return;
     }
     double dt = (now - last_time_).seconds();
-    last_time_ = now;
-    double time = (now - time0_).seconds();
+    // double time = (now - time0_).seconds();
 
     waypoint target = path_transformed_[trajectory_index_];
     // tf2::Quaternion q_desired = lookAtTheDuct(current_pose_.pose.position);
@@ -455,16 +452,31 @@ void TrajectoryController::pathFollower()
     // Rotation of the ROV
     double error_forward = std::cos(current_yaw)*error_x + std::sin(current_yaw)*error_y;
     double error_lateral = -std::sin(current_yaw)*error_x + std::cos(current_yaw)*error_y;
-
+    
+    // Integral control
     ef_integral_ += error_forward*dt;
     el_integral_ += error_lateral*dt;
     ed_integral_ += error_z*dt;
     ey_integral_ += yaw*dt;
 
-    double forward_cmd = kp*error_forward + ki*ef_integral_;
-    double lateral_cmd = kp*error_lateral + ki*el_integral_;
-    double depth_cmd = kp*error_z + ki*ed_integral_;
-    double yaw_cmd = kp*yaw + ki*ey_integral_;
+    // Derivate control
+    double ef_derivate_ = (error_forward - ef_last_)/dt;
+    double el_derivate_ = (error_lateral - el_last_)/dt;
+    double ed_derivate_ = (error_z - ed_last_)/dt;
+    double ey_derivate_ = (yaw - ey_last_)/dt;
+
+    // PID control
+    forward_cmd = 2.4*error_forward + 2*ef_integral_ + 0.72*ef_derivate_;
+    lateral_cmd = 3*error_lateral + 2.6*el_integral_ + 0.86*el_derivate_;
+    depth_cmd = 6*error_z + 6*ed_integral_ + 1.5*ed_derivate_;
+    yaw_cmd = 0.9*yaw + 0.9*ey_integral_ + 0.3*ey_derivate_;
+
+    ef_last_ = error_forward;
+    el_last_ = error_lateral;
+    ed_last_ = error_z;
+    ey_last_ = yaw;
+
+    last_time_ = now;
 
     // Euclidean distance
     double distance = std::hypot(error_x,error_y, error_z);
@@ -473,16 +485,12 @@ void TrajectoryController::pathFollower()
     if (distance < threshold)
     {
         trajectory_index_++;
-        ef_integral_ = 0.0;
-        el_integral_ = 0.0;
-        ed_integral_ = 0.0;
-        ey_integral_ = 0.0;
     }
 
     publish_rc(forward_cmd, lateral_cmd, depth_cmd, yaw_cmd);
 
-    control_ << forward_cmd << "\n";
-    time_ << time << "\n";
+    // control_ << depth_cmd << "\n";
+    // time_ << time << "\n";
 }
 
 

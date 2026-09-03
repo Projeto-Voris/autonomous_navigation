@@ -26,6 +26,7 @@ void PathGenerate::generate_path_cb(const std::shared_ptr<autonomous_navigation_
     path_params_.dz = request->dz;
     path_params_.turns = request->turns;
     path_params_.depth = request->depth;
+    path_params_.points = request->points;
     path_type_ = stringToPathType(request->path_type);
     RCLCPP_INFO(this->get_logger(), "%s", path_type_ == PathType::SQUARE ? "SQUARE" : path_type_ == PathType::CIRCLE ? "CIRCLE" : path_type_ == PathType::SPIRAL ? "SPIRAL" : path_type_ == PathType::SERPENTINE ? "SERPENTINE" : path_type_ == PathType::LINE ? "LINE" : "UNKNOWN");
     generatePath();
@@ -220,7 +221,7 @@ void PathGenerate::lineGenerate()
     double dz = path_params_.dz;
 
     for (double x = 0; x <= L; x += d)
-        wp_.push_back({x,0,dz});
+        wp_.push_back({x,0.0,dz});
 }
 
 void PathGenerate::generatePath()

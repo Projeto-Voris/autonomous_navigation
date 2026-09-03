@@ -78,6 +78,7 @@ private:
         double dz{-1.0};
         int turns{4};
         int depth{4};
+        int points{50};
     };
     PathParams path_params_;
     std::string frame_id_;

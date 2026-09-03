@@ -136,10 +136,20 @@ private:
     std::ofstream control_;
     std::ofstream time_;
 
+    double forward_cmd;
+    double lateral_cmd;
+    double depth_cmd;
+    double yaw_cmd;
+
     double ef_integral_;
     double el_integral_;
     double ed_integral_;
     double ey_integral_;
+
+    double ef_last_;
+    double el_last_;
+    double ed_last_;
+    double ey_last_;
 };
 
 #endif // TRAJECTORY_CONTROLLER_HPP

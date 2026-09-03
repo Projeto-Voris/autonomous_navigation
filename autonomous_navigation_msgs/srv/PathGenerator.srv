@@ -11,6 +11,7 @@ float32 dz
 float32 radius
 int8 turns
 int8 depth
+int8 points
 
 ---
 # Response (Feedback returned by the service)
