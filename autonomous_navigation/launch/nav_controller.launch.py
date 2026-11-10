@@ -5,11 +5,11 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     return LaunchDescription([
-        DeclareLaunchArgument('frame_id', default_value='map', description='Reference frame id'),
+        DeclareLaunchArgument('frame_id', default_value='odom', description='Reference frame id'),
         DeclareLaunchArgument('duct_x', default_value='3.0', description='Duct position along the X-axis'),
         DeclareLaunchArgument('duct_y', default_value='1.5', description='Duct position along the Y-axis'),
         DeclareLaunchArgument('duct_z', default_value='-1.0', description='Duct position along the Z-axis'),
-        DeclareLaunchArgument('delta', default_value='0.1', description='Distance between waypoints of the path'),
+        DeclareLaunchArgument('delta', default_value='0.5', description='Distance between waypoints of the path'),
         DeclareLaunchArgument('kp', default_value='1.125', description='Proportional gain for the proportional controller'),
         DeclareLaunchArgument('ki', default_value='0.45', description='Integral gain for the proportional controller'),
         DeclareLaunchArgument('side', default_value='2.15', description='Side length of the square'),
@@ -18,7 +18,7 @@ def generate_launch_description():
         DeclareLaunchArgument('turns', default_value='4', description='Number of spiral'),
         DeclareLaunchArgument('depth', default_value='4', description='Depth of the serpetine path'),
         DeclareLaunchArgument('points', default_value='50', description='Number of points'),
-        DeclareLaunchArgument('path_type', default_value='1', description='shape of the trajectory'),
+        DeclareLaunchArgument('path_type', default_value='0', description='shape of the trajectory'),
         DeclareLaunchArgument('debug_mode', default_value='False', description=''),
         DeclareLaunchArgument('namespace', default_value=['navigation'], description='Namespace'),
 
@@ -32,10 +32,44 @@ def generate_launch_description():
                         ],
         ),
 
+        # Node(
+        #     package='autonomous_navigation',
+        #     executable='nav2_planner',
+        #     name='nav2_planner',
+        #     namespace=LaunchConfiguration('namespace'),
+        #     output='screen',
+        #     parameters=[{'frame_id': LaunchConfiguration('frame_id')},
+        #                 ],
+        # ),
+
+        # Node(
+        #     package='autonomous_navigation',
+        #     executable='trajectory_controller',
+        #     name='trajectory_controller',
+        #     namespace=LaunchConfiguration('namespace'),
+        #     output='screen',
+        #     parameters=[
+        #                 {'delta': LaunchConfiguration('delta')},
+        #                 {'side': LaunchConfiguration('side')},
+        #                 {'radius': LaunchConfiguration('radius')},
+        #                 {'dz': LaunchConfiguration('dz')},
+        #                 {'turns': LaunchConfiguration('turns')},
+        #                 {'depth': LaunchConfiguration('depth')},
+        #                 {'points': LaunchConfiguration('points')},
+        #                 {'path_type': LaunchConfiguration('path_type')},
+        #                 {'duct_x': LaunchConfiguration('duct_x')},
+        #                 {'duct_y': LaunchConfiguration('duct_y')},
+        #                 {'duct_z': LaunchConfiguration('duct_z')},
+        #                 {'kp': LaunchConfiguration('kp')},
+        #                 {'ki': LaunchConfiguration('ki')},
+        #                 {'debug_mode': LaunchConfiguration('debug_mode')}
+        #                 ],
+        # )
+
         Node(
             package='autonomous_navigation',
-            executable='trajectory_controller',
-            name='trajectory_controller',
+            executable='nav2_controller',
+            name='nav2_controller',
             namespace=LaunchConfiguration('namespace'),
             output='screen',
             parameters=[

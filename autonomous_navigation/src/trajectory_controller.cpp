@@ -4,7 +4,7 @@
 
 TrajectoryController::TrajectoryController() : Node("trajectory_controller")
 {
-    this->declare_parameter<std::string>("frame_id", "map");
+    this->declare_parameter<std::string>("frame_id", "odom");
 
     this->declare_parameter<double>("delta", 0.2);
     this->declare_parameter<double>("side", 2.0);
@@ -37,7 +37,10 @@ TrajectoryController::TrajectoryController() : Node("trajectory_controller")
         odom_file_.open("/home/biancarosa/Documents/logs_auv/odometry.txt");
         wp_file_.open("/home/biancarosa/Documents/logs_auv/wp_file_.txt");
         alt_file_.open("/home/biancarosa/Documents/logs_auv/alt_file_.txt");
-        control_.open("/home/biancarosa/Documents/logs_auv/control_.txt");
+        control_x.open("/home/biancarosa/Documents/logs_auv/control_x.txt");
+        control_y.open("/home/biancarosa/Documents/logs_auv/control_y.txt");
+        control_z.open("/home/biancarosa/Documents/logs_auv/control_z.txt");
+        control_rz.open("/home/biancarosa/Documents/logs_auv/control_rz.txt");
         time_.open("/home/biancarosa/Documents/logs_auv/time_.txt");
     }
 
@@ -50,13 +53,15 @@ TrajectoryController::TrajectoryController() : Node("trajectory_controller")
 
 
     generate_trajectory_client = this->create_client<autonomous_navigation_msgs::srv::PathGenerator>("generate_path", rmw_qos_profile_services_default, cb_group_);
+    // generate_trajectory_client = this->create_client<autonomous_navigation_msgs::srv::Nav2Planner>("generate_path", rmw_qos_profile_services_default, cb_group_);
     mavros_arm_client_ = this->create_client<mavros_msgs::srv::CommandBool>("/mavros/cmd/arming", rmw_qos_profile_services_default, cb_group_);
     mavros_set_mode_client_ = this->create_client<mavros_msgs::srv::SetMode>("/mavros/set_mode", rmw_qos_profile_services_default, cb_group_);
     start_trajectory_srv = this->create_service<std_srvs::srv::SetBool>("start_trajectory", std::bind(&TrajectoryController::start_trajectory_cb, this, std::placeholders::_1, std::placeholders::_2));
 
 
-    slam_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>("/mavros/vision_pose/pose", 10, std::bind(&TrajectoryController::slam_cb, this, std::placeholders::_1));
+    slam_sub_ = this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>("/mavros/vision_pose/pose_cov", 10, std::bind(&TrajectoryController::slam_cb, this, std::placeholders::_1));
     state_sub_ = this->create_subscription<mavros_msgs::msg::State>("/mavros/state", 10, std::bind(&TrajectoryController::state_cb, this, std::placeholders::_1));
+    // path_sub_ = this->create_subscription<nav_msgs::msg::Path>("/plan", 10, std::bind(&TrajectoryController::transformPath, this, std::placeholders::_1));
     path_sub_ = this->create_subscription<nav_msgs::msg::Path>("local_path", 10, std::bind(&TrajectoryController::transformPath, this, std::placeholders::_1));
     alt_sub_ = this->create_subscription<mavros_msgs::msg::VfrHud>("/mavros/vfr_hud", 10, std::bind(&TrajectoryController::alt_cb, this, std::placeholders::_1));
     
@@ -69,7 +74,7 @@ TrajectoryController::TrajectoryController() : Node("trajectory_controller")
     sub_options.callback_group = cb_group_sub_;
     odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>("/mavros/local_position/odom", qos, std::bind(&TrajectoryController::odom_cb, this, std::placeholders::_1), sub_options  );
     
-    gain_ = 0.3;
+    gain_ = 0.5;
     trajectory_index_ = 0;
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -83,7 +88,10 @@ TrajectoryController::~TrajectoryController()
         odom_file_.close();
         wp_file_.close();
         alt_file_.close();
-        control_.close();
+        control_x.close();
+        control_y.close();
+        control_z.close();
+        control_rz.close();
         time_.close();
     }
     RCLCPP_INFO(this->get_logger(), "Disarming the robot before shutdown");
@@ -136,6 +144,117 @@ void TrajectoryController::start_trajectory_cb(const std::shared_ptr<std_srvs::s
     response->message = follow_path ? "Trajectory following started" : "Trajectory following stopped";
     }
 }
+
+// void TrajectoryController::start_trajectory_cb(const std::shared_ptr<std_srvs::srv::SetBool::Request> request, std::shared_ptr<std_srvs::srv::SetBool::Response> response)
+// {
+//     if (request->data) {
+//         RCLCPP_INFO(this->get_logger(), "Starting trajectory following");
+
+//         last_time_ = this->now();
+//         time0_=this->now();
+//         set_origin_ = false; // Reset the origin to get the current position as the new origin
+
+//         auto req = std::make_shared<autonomous_navigation_msgs::srv::PathGenerator::Request>();
+
+//         req->delta = this->get_parameter("delta").as_double();
+//         req->side = this->get_parameter("side").as_double();
+//         req->radius = this->get_parameter("radius").as_double();
+//         req->dz = this->get_parameter("dz").as_double();
+//         req->turns = this->get_parameter("turns").as_int();
+//         req->depth = this->get_parameter("depth").as_int();
+//         req->points = this->get_parameter("points").as_int();
+//         req->path_type = this->get_parameter("path_type").as_int();
+
+//         auto future = generate_trajectory_client->async_send_request(req);
+
+//         // Wait for the future safely (since the callback group is Reentrant)
+//         if (future.wait_for(std::chrono::seconds(5)) == std::future_status::ready) {
+//             auto result = future.get();
+//             if (result->success) {
+//                 RCLCPP_INFO(this->get_logger(), "Trajectory generated successfully");
+//                 rclcpp::sleep_for(std::chrono::milliseconds(2000)); // Wait for a short duration to ensure the path is published
+//                 trajectory_index_ = 0;
+//                 follow_path = request->data; // Start following the path
+//                 response->success = true;
+//                 response->message = "Trajectory generated and started successfully";
+//             } else {
+//                 RCLCPP_ERROR(this->get_logger(), "Failed to generate trajectory: %s", result->message.c_str());
+//                 response->success = false;
+//                 response->message = "Failed to generate trajectory: " + result->message;
+//             }
+//     } else {
+//         RCLCPP_INFO(this->get_logger(), "Stopping trajectory following");
+//         follow_path = request->data; 
+//         publish_rc(0.0, 0.0, 0.0, 0.0); // Stop the robot
+//     }
+//     response->success = true;
+//     response->message = follow_path ? "Trajectory following started" : "Trajectory following stopped";
+//     }
+// }
+
+// void TrajectoryController::start_trajectory_cb(const std::shared_ptr<std_srvs::srv::SetBool::Request> request, std::shared_ptr<std_srvs::srv::SetBool::Response> response)
+// {
+//     if (request->data) {
+
+//     RCLCPP_INFO(this->get_logger(), "Starting trajectory following");
+
+//     last_time_ = this->now();
+//     time0_ = this->now();
+//     set_origin_ = false;
+
+//     auto req = std::make_shared<autonomous_navigation_msgs::srv::Nav2Planner::Request>();
+
+//     // req->goal.header.frame_id = "map";
+//     // req->goal.header.stamp = this->now();
+
+//     // req->goal.pose.position.x = 2.0;
+//     // req->goal.pose.position.y = 1.5;
+//     // req->goal.pose.orientation.w = 1.0;
+
+//     auto make_pose = [this](double x, double y, double yaw = 0.0) {
+//         geometry_msgs::msg::PoseStamped p;
+//         p.header.frame_id = "map";
+//         p.header.stamp = this->now();
+//         p.pose.position.x = x;
+//         p.pose.position.y = y;
+//         p.pose.orientation.z = std::sin(yaw/2);
+//         p.pose.orientation.w = std::cos(yaw/2);
+//         return p;
+//     };
+
+//     // req->start = make_pose(0.0, 0.0);
+//     req->goals.push_back(make_pose(2.0,1.5));
+//     req->goals.push_back(make_pose(4.0, 1.5, M_PI_2));
+//     req->goals.push_back(make_pose(4.0, 3.0));
+
+//     auto future = generate_trajectory_client->async_send_request(req);
+
+//     // Wait for the future safely (since the callback group is Reentrant)
+//     if (future.wait_for(std::chrono::seconds(5)) == std::future_status::ready) {
+//         auto result = future.get();
+//         if (result->success) {
+//             RCLCPP_INFO(this->get_logger(), "Trajectory generated successfully");
+//             rclcpp::sleep_for(std::chrono::milliseconds(2000)); // Wait for a short duration to ensure the path is published
+//             current_path_ = result->plan;
+//             trajectory_index_ = 0;
+//             follow_path = request->data; // Start following the path
+//             response->success = true;
+//             response->message = "Trajectory generated and started successfully";
+//         } else {
+//             RCLCPP_ERROR(this->get_logger(), "Failed to generate trajectory: %s", result->message.c_str());
+//             response->success = false;
+//             response->message = "Failed to generate trajectory: " + result->message;
+//         }
+//     } else {
+//         RCLCPP_INFO(this->get_logger(), "Stopping trajectory following");
+//         follow_path = request->data; 
+//         publish_rc(0.0, 0.0, 0.0, 0.0); // Stop the robot
+//     }
+//     response->success = true;
+//     response->message = follow_path ? "Trajectory following started" : "Trajectory following stopped";
+//     }
+// }
+
 void TrajectoryController::state_cb(const mavros_msgs::msg::State::ConstSharedPtr & msg)
 {
     connected_ = msg->connected;
@@ -265,11 +384,11 @@ void TrajectoryController::odom_cb(const nav_msgs::msg::Odometry::ConstSharedPtr
     }   
 }
 
-void TrajectoryController::slam_cb(const geometry_msgs::msg::PoseStamped::ConstSharedPtr & msg)
+void TrajectoryController::slam_cb(const geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr & msg)
 {
     if(this->get_parameter("debug_mode").as_bool())
     {
-        slam_file_ << msg->pose.position.x << " " << msg->pose.position.y << " " << msg->pose.position.z << " " << msg->pose.orientation.x << " " << msg->pose.orientation.y << " " << msg->pose.orientation.z << " " << msg->pose.orientation.w << '\n';
+        slam_file_ << msg->pose.pose.position.x << " " << msg->pose.pose.position.y << " " << msg->pose.pose.position.z << " " << msg->pose.pose.orientation.x << " " << msg->pose.pose.orientation.y << " " << msg->pose.pose.orientation.z << " " << msg->pose.pose.orientation.w << '\n';
     }
 }
 
@@ -422,11 +541,16 @@ void TrajectoryController::pathFollower()
         return;
     }
     double dt = (now - last_time_).seconds();
-    // double time = (now - time0_).seconds();
+    double time = (now - time0_).seconds();
+
+    ef_integral_ = 0.0;
+    el_integral_ = 0.0;
+    ed_integral_ = 0.0;
+    ey_integral_ = 0.0;
 
     waypoint target = path_transformed_[trajectory_index_];
-    // tf2::Quaternion q_desired = lookAtTheDuct(current_pose_.pose.position);
-    tf2::Quaternion q_desired(0.0, 0.0, 0.0, 1.0); // No rotation for now
+    tf2::Quaternion q_desired = lookAtTheDuct(current_pose_.pose.position);
+    // tf2::Quaternion q_desired(0.0, 0.0, 0.0, 1.0); // No rotation for now
 
     // Current Pose
     double current_x = current_pose_.pose.position.x;
@@ -459,22 +583,33 @@ void TrajectoryController::pathFollower()
     ed_integral_ += error_z*dt;
     ey_integral_ += yaw*dt;
 
-    // Derivate control
-    double ef_derivate_ = (error_forward - ef_last_)/dt;
-    double el_derivate_ = (error_lateral - el_last_)/dt;
-    double ed_derivate_ = (error_z - ed_last_)/dt;
-    double ey_derivate_ = (yaw - ey_last_)/dt;
+    // // Derivate control
+    // double ef_derivate_ = (error_forward - ef_last_)/dt;
+    // double el_derivate_ = (error_lateral - el_last_)/dt;
+    // double ed_derivate_ = (error_z - ed_last_)/dt;
+    // double ey_derivate_ = (yaw - ey_last_)/dt;
 
-    // PID control
-    forward_cmd = 2.4*error_forward + 2*ef_integral_ + 0.72*ef_derivate_;
-    lateral_cmd = 3*error_lateral + 2.6*el_integral_ + 0.86*el_derivate_;
-    depth_cmd = 6*error_z + 6*ed_integral_ + 1.5*ed_derivate_;
-    yaw_cmd = 0.9*yaw + 0.9*ey_integral_ + 0.3*ey_derivate_;
+    // // PID control
+    // forward_cmd = 2.4*error_forward + 2*ef_integral_ + 0.72*ef_derivate_;
+    // lateral_cmd = 3*error_lateral + 2.6*el_integral_ + 0.86*el_derivate_;
+    // depth_cmd = 6*error_z + 6*ed_integral_ + 1.5*ed_derivate_;
+    // yaw_cmd = 0.9*yaw + 0.9*ey_integral_ + 0.3*ey_derivate_;
 
-    ef_last_ = error_forward;
-    el_last_ = error_lateral;
-    ed_last_ = error_z;
-    ey_last_ = yaw;
+    // ef_last_ = error_forward;
+    // el_last_ = error_lateral;
+    // ed_last_ = error_z;
+    // ey_last_ = yaw;
+
+    // PI control
+    forward_cmd = 0.41*error_forward + 0.12*ef_integral_;
+    lateral_cmd = 0.41*error_lateral + 0.12*el_integral_;
+    depth_cmd = 1.9*error_z + 1.8*ed_integral_;
+    yaw_cmd = 0.61*yaw + 0.12*ey_integral_;
+
+    // forward_cmd = kp*error_forward;
+    // lateral_cmd = kp*error_lateral;
+    // depth_cmd = kp*error_z;
+    // yaw_cmd = kp*yaw;
 
     last_time_ = now;
 
@@ -489,8 +624,11 @@ void TrajectoryController::pathFollower()
 
     publish_rc(forward_cmd, lateral_cmd, depth_cmd, yaw_cmd);
 
-    // control_ << depth_cmd << "\n";
-    // time_ << time << "\n";
+    control_x << forward_cmd << "\n";
+    control_y << lateral_cmd << "\n";
+    control_z << depth_cmd << "\n";
+    control_rz << yaw_cmd << "\n";
+    time_ << time << "\n";
 }
 
 

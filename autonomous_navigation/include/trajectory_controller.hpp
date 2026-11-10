@@ -11,12 +11,14 @@
 #include <rclcpp/rclcpp.hpp>
 #include <std_srvs/srv/set_bool.hpp>
 #include <autonomous_navigation_msgs/srv/path_generator.hpp>
+// #include <autonomous_navigation_msgs/srv/nav2_planner.hpp>
 #include "mavros_msgs/msg/override_rc_in.hpp"
 #include "mavros_msgs/srv/command_bool.hpp"
 #include "mavros_msgs/srv/set_mode.hpp"
 #include "mavros_msgs/msg/vfr_hud.hpp"
 #include "mavros_msgs/msg/state.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
+#include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "geometry_msgs/msg/twist.hpp"
@@ -60,8 +62,8 @@ private:
     rclcpp::Subscription<mavros_msgs::msg::VfrHud>::SharedPtr alt_sub_;
     void alt_cb(const mavros_msgs::msg::VfrHud::ConstSharedPtr & msg);
 
-    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr slam_sub_;
-    void slam_cb(const geometry_msgs::msg::PoseStamped::ConstSharedPtr & msg);
+    rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr slam_sub_;
+    void slam_cb(const geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr & msg);
     
     rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr start_trajectory_srv;
     void start_trajectory_cb(const std::shared_ptr<std_srvs::srv::SetBool::Request> request, std::shared_ptr<std_srvs::srv::SetBool::Response> response);
@@ -72,11 +74,13 @@ private:
     geometry_msgs::msg::PoseStamped pose_odom_;
     rclcpp::Time last_time_;
     rclcpp::Time time0_;
+    // nav_msgs::msg::Path current_path_;
 
     rclcpp::Publisher<mavros_msgs::msg::OverrideRCIn>::SharedPtr rc_pub_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
 
     rclcpp::Client<autonomous_navigation_msgs::srv::PathGenerator>::SharedPtr generate_trajectory_client;
+    // rclcpp::Client<autonomous_navigation_msgs::srv::Nav2Planner>::SharedPtr generate_trajectory_client;
     rclcpp::Client<mavros_msgs::srv::CommandBool>::SharedPtr mavros_arm_client_;
     rclcpp::Client<mavros_msgs::srv::SetMode>::SharedPtr mavros_set_mode_client_;   
 
@@ -133,7 +137,10 @@ private:
     std::ofstream odom_file_;
     std::ofstream wp_file_;
     std::ofstream alt_file_;
-    std::ofstream control_;
+    std::ofstream control_x;
+    std::ofstream control_y;
+    std::ofstream control_z;
+    std::ofstream control_rz;
     std::ofstream time_;
 
     double forward_cmd;

@@ -164,7 +164,7 @@ void PathGenerate::serpentineGenerate()
     // Clear previous waypoints
     wp_.clear();
 
-    double w = path_params_.dz; // Vertical depth (positive value)
+    double w = -path_params_.dz; // Vertical depth (positive value)
     double d = path_params_.delta; // Step discretization
     int turns = path_params_.turns;
     double h = path_params_.side;  // Horizontal spacing between vertical legs
@@ -218,10 +218,10 @@ void PathGenerate::lineGenerate()
 {
     double L = path_params_.side;
     double d = path_params_.delta;
-    double dz = path_params_.dz;
+    // double dz = path_params_.dz;
 
-    for (double x = 0; x <= L; x += d)
-        wp_.push_back({x,0.0,dz});
+    for (double x = 0; x <=L; x += d)
+        wp_.push_back({x,0.0,0.0});
 }
 
 void PathGenerate::generatePath()
@@ -249,7 +249,7 @@ void PathGenerate::generatePath()
     path_.clear();
 
     // Transform the trajectory into points
-    constexpr int sample = 200; // Define the number of point that will be get
+    constexpr int sample = 50; // Define the number of point that will be get
     for (int i = 0; i <= sample; i++)
     {
         // Normalization to u between 0 and 1, spline eigen wait u between [0,1], evaluate where is the point 

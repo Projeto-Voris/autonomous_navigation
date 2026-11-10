@@ -13,7 +13,10 @@ int8 turns
 int8 depth
 int8 points
 
+geometry_msgs/PoseStamped[] goals
+
 ---
 # Response (Feedback returned by the service)
 bool success
 string message
+nav_msgs/Path plan

@@ -23,13 +23,16 @@ find_package(ament_cmake_auto REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
 ament_auto_find_build_dependencies()
 
 # Generate ROS messages
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/PathGenerator.srv"
-  DEPENDENCIES builtin_interfaces sensor_msgs std_msgs
+  "srv/Nav2Planner.srv"
+  DEPENDENCIES builtin_interfaces sensor_msgs std_msgs nav_msgs geometry_msgs
 )
 
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
